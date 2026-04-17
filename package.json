@@ -1,0 +1,21 @@
+{
+  "name": "vk-bot-netlify",
+  "version": "1.0.0",
+  "description": "VK Personal Assistant Bot on Netlify Serverless Functions",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "netlify dev",
+    "build": "echo 'Build complete'",
+    "deploy": "netlify deploy --prod"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.38.0",
+    "crypto": "^1.0.1",
+    "node-fetch": "^3.3.0"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^2.4.0",
+    "netlify-cli": "^17.0.0"
+  }
+}

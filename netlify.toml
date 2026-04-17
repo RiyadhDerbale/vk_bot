@@ -1,0 +1,21 @@
+[build]
+  command = "npm install"
+  functions = "netlify/functions"
+  publish = "public"
+
+[functions]
+  node_bundler = "esbuild"
+  external_node_modules = ["vk-sdk"]
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[env]
+  [env.production]
+    [env.production.context.production.environment]
+      VK_TOKEN = ""
+      GROUP_ID = ""
+      SUPABASE_URL = ""
+      SUPABASE_KEY = ""
