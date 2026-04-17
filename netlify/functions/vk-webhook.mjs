@@ -360,6 +360,15 @@ async function handleMessage(vk, userId, text, lang) {
       getMainKeyboard(),
     );
   }
+
+  // Fallback: Send help for any unhandled message
+  if (text && !text.startsWith("/")) {
+    await sendMessage(
+      userId,
+      getResponse(userId, lang, "help_text"),
+      getMainKeyboard(),
+    );
+  }
 }
 
 // ========== WEBHOOK HANDLER ==========
