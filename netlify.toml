@@ -1,6 +1,7 @@
 [build]
-  command = "echo 'Building functions'"
+  command = "echo 'Building serverless functions'"
   functions = "netlify/functions"
+  publish = "."
 
 [functions]
   node_bundler = "esbuild"
