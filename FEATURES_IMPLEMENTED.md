@@ -3,6 +3,7 @@
 ## ✅ All Features from Python Bot Implemented in JavaScript/Netlify
 
 ### 📅 Schedule Management
+
 - **View Schedule** - `📅 Schedule` button
   - Shows all classes for the week sorted by day
   - Format: `Day • Start-End — Subject`
@@ -18,6 +19,7 @@
   - Removes from database
 
 ### 📝 Task/Deadline Management
+
 - **View Tasks** - `📝 My tasks` button
   - Shows all pending tasks with due dates
   - Displays: Task name, due date, reminder offset
@@ -34,6 +36,7 @@
   - Uses payload/callback system
 
 ### ⚙️ Settings
+
 - **Reminder Offset** - `⚙️ Settings` button
   - Shows current notification offset (default: 60 minutes)
   - Allows users to adjust when reminders are sent
@@ -41,6 +44,7 @@
   - Bilingual interface
 
 ### 🌐 Language Support
+
 - **Auto-Detection** - Automatically detects Russian or English
   - Russian detected: Characters а-яА-ЯёЁ
   - Stores preference in database
@@ -52,6 +56,7 @@
   - Easy to add more languages
 
 ### 💬 Keyboard Navigation
+
 - **Main Keyboard** (6 buttons)
   1. 📅 Schedule - View all classes
   2. ➕ Add class - Instructions for /add command
@@ -69,6 +74,7 @@
   - Uses payload system for inline responses
 
 ### 📚 Help & Responses
+
 - **Help Command** - `/help` or `❓ Help` button
   - Shows all available commands
   - Examples for each command
@@ -80,6 +86,7 @@
   - Error handling with user-friendly messages
 
 ### 🔔 Reminder System (in check-reminders.mjs)
+
 - **Class Reminders**
   - Sends 60-90 minutes before class
   - Based on schedule and day of week
@@ -91,6 +98,7 @@
   - Prevents duplicate reminders using reminders table
 
 ### 🛡️ Error Handling
+
 - **Graceful Failures**
   - Try-catch blocks on all database operations
   - Friendly error messages to users
@@ -103,6 +111,7 @@
   - User operations fail gracefully
 
 ### 📊 Database Tables
+
 - **users** - VK profiles
   - vk_id (primary key)
   - language (en/ru)
@@ -122,6 +131,7 @@
   - Used by check-reminders.mjs
 
 ### 🚀 Deployment
+
 - **Platform:** Netlify Serverless Functions
 - **Database:** Supabase PostgreSQL
 - **Runtime:** Node.js 18+ with ESBuild
@@ -129,17 +139,18 @@
 
 ### 📝 Command Reference
 
-| Command | Format | Example |
-|---------|--------|---------|
-| Add Class | `/add <subject> <day> <start> <end>` | `/add Math 1 10:30 12:05` |
-| Delete Class | `/delete <subject> <day> <start>` | `/delete Math 1 10:30` |
-| Add Task | `/deadline <task> <date> <days>` | `/deadline Report 2025-12-20 12:00 2` |
-| Help | `❓ Help` button | - |
-| Schedule | `📅 Schedule` button | - |
-| Tasks | `📝 My tasks` button | - |
-| Settings | `⚙️ Settings` button | - |
+| Command      | Format                               | Example                               |
+| ------------ | ------------------------------------ | ------------------------------------- |
+| Add Class    | `/add <subject> <day> <start> <end>` | `/add Math 1 10:30 12:05`             |
+| Delete Class | `/delete <subject> <day> <start>`    | `/delete Math 1 10:30`                |
+| Add Task     | `/deadline <task> <date> <days>`     | `/deadline Report 2025-12-20 12:00 2` |
+| Help         | `❓ Help` button                     | -                                     |
+| Schedule     | `📅 Schedule` button                 | -                                     |
+| Tasks        | `📝 My tasks` button                 | -                                     |
+| Settings     | `⚙️ Settings` button                 | -                                     |
 
 ## ✨ Features Not Yet Implemented (Optional Enhancements)
+
 - [ ] ICS file upload/parsing
 - [ ] Attendance logging
 - [ ] Study time tracking
@@ -149,11 +160,12 @@
 - [ ] Recurring tasks
 
 ## 📋 Status
+
 ✅ **PRODUCTION READY**
+
 - All core features working
 - Database initialized
 - Webhooks configured
 - Error handling complete
 - Bilingual support active
 - Ready for user testing
-

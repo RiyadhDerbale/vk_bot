@@ -104,9 +104,7 @@ function getSettingsKeyboard(offset) {
           color: "primary",
         },
       ],
-      [
-        { action: { type: "text", label: "🔙 Back" }, color: "secondary" },
-      ],
+      [{ action: { type: "text", label: "🔙 Back" }, color: "secondary" }],
     ],
   });
 }
@@ -128,10 +126,9 @@ async function getUserLanguage(userId) {
 
 async function setUserLanguage(userId, language) {
   try {
-    await supabase.from("users").upsert(
-      { vk_id: userId, language },
-      { onConflict: "vk_id" },
-    );
+    await supabase
+      .from("users")
+      .upsert({ vk_id: userId, language }, { onConflict: "vk_id" });
   } catch (error) {
     console.error("setUserLanguage error:", error.message);
   }
@@ -169,7 +166,10 @@ async function setUserOffset(userId, minutes) {
   try {
     await supabase
       .from("users")
-      .upsert({ vk_id: userId, notify_offset: minutes }, { onConflict: "vk_id" });
+      .upsert(
+        { vk_id: userId, notify_offset: minutes },
+        { onConflict: "vk_id" },
+      );
     return true;
   } catch (error) {
     console.error("setUserOffset error:", error.message);
@@ -291,7 +291,8 @@ const responses = {
     class_added: "✅ Class '{subject}' added!",
     class_deleted: "✅ Class '{subject}' deleted!",
     task_completed: "✅ Task marked as done!",
-    settings_text: "⚙️ **Settings:**\n🔔 Reminder offset: {offset} minutes\nUse buttons to adjust",
+    settings_text:
+      "⚙️ **Settings:**\n🔔 Reminder offset: {offset} minutes\nUse buttons to adjust",
     help_text: `📖 **Available Commands:**
 
 📅 **Schedule:**
@@ -309,7 +310,8 @@ Example: /deadline Report 2025-12-20 12:00 2`,
   },
   ru: {
     greeting: "Привет {name}! 👋 Добро пожаловать в персональный помощник!",
-    schedule_empty: "📅 Ваше расписание пусто. Используйте кнопки для добавления.",
+    schedule_empty:
+      "📅 Ваше расписание пусто. Используйте кнопки для добавления.",
     schedule_header: "📚 **Ваше расписание:**\n",
     schedule_item: "{day} • {start}-{end} — {subject}\n",
     add_class_help:
@@ -323,7 +325,8 @@ Example: /deadline Report 2025-12-20 12:00 2`,
     class_added: "✅ Занятие '{subject}' добавлено!",
     class_deleted: "✅ Занятие '{subject}' удалено!",
     task_completed: "✅ Задача отмечена как выполненная!",
-    settings_text: "⚙️ **Настройки:**\n🔔 Смещение уведомлений: {offset} минут\nИспользуйте кнопки для изменения",
+    settings_text:
+      "⚙️ **Настройки:**\n🔔 Смещение уведомлений: {offset} минут\nИспользуйте кнопки для изменения",
     help_text: `📖 **Доступные команды:**
 
 📅 **Расписание:**
@@ -467,7 +470,13 @@ async function handleMessage(userId, text, lang) {
         const day = parseInt(dayStr);
 
         if (!isNaN(day) && day >= 0 && day <= 6) {
-          const success = await addSchedule(userId, subject, day, startTime, endTime);
+          const success = await addSchedule(
+            userId,
+            subject,
+            day,
+            startTime,
+            endTime,
+          );
           if (success) {
             await sendMessage(
               userId,
@@ -477,7 +486,9 @@ async function handleMessage(userId, text, lang) {
           } else {
             await sendMessage(
               userId,
-              lang === "ru" ? "❌ Ошибка добавления класса" : "❌ Error adding class",
+              lang === "ru"
+                ? "❌ Ошибка добавления класса"
+                : "❌ Error adding class",
               getMainKeyboard(),
             );
           }
@@ -520,7 +531,9 @@ async function handleMessage(userId, text, lang) {
           } else {
             await sendMessage(
               userId,
-              lang === "ru" ? "❌ Ошибка удаления класса" : "❌ Error deleting class",
+              lang === "ru"
+                ? "❌ Ошибка удаления класса"
+                : "❌ Error deleting class",
               getMainKeyboard(),
             );
           }
@@ -563,7 +576,9 @@ async function handleMessage(userId, text, lang) {
           } else {
             await sendMessage(
               userId,
-              lang === "ru" ? "❌ Ошибка добавления задачи" : "❌ Error adding task",
+              lang === "ru"
+                ? "❌ Ошибка добавления задачи"
+                : "❌ Error adding task",
               getMainKeyboard(),
             );
           }
@@ -633,7 +648,9 @@ async function handlePayload(userId, payload, lang) {
       } else {
         await sendMessage(
           userId,
-          lang === "ru" ? "❌ Ошибка выполнения задачи" : "❌ Error completing task",
+          lang === "ru"
+            ? "❌ Ошибка выполнения задачи"
+            : "❌ Error completing task",
           getMainKeyboard(),
         );
       }
