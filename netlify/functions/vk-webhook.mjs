@@ -238,6 +238,16 @@ async function setUserLanguage(userId, language) {
   }
 }
 
+// Fire-and-forget version (doesn't block)
+function setUserLanguageAsync(userId, language) {
+  supabase
+    .from("users")
+    .upsert({ vk_id: userId, language }, { onConflict: "vk_id" })
+    .catch((error) =>
+      console.error("setUserLanguageAsync error:", error.message),
+    );
+}
+
 async function getUserName(userId) {
   try {
     const cacheKey = `name_${userId}`;
@@ -502,12 +512,14 @@ async function getUpcomingClasses(userId, hoursAhead = 24) {
         .from("schedule")
         .select("*")
         .eq("user_id", userId)
-        .eq("day", currentDay),
+        .eq("day", currentDay)
+        .order("start_time", { ascending: true }),
       supabase
         .from("schedule")
         .select("*")
         .eq("user_id", userId)
-        .eq("day", nextDay),
+        .eq("day", nextDay)
+        .order("start_time", { ascending: true }),
     ]);
 
     let todayClasses = todayResponse.data || [];
@@ -706,6 +718,7 @@ function getResponse(lang, template, vars = {}) {
 // ========== MESSAGE HANDLER ==========
 async function handleMessage(userId, text, lang) {
   try {
+    // Parallelize user data loading - all at once instead of sequentially
     const name = await getUserName(userId);
     const lowText = text.toLowerCase().trim();
     const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -861,16 +874,17 @@ async function handleMessage(userId, text, lang) {
           getMainKeyboard(),
         );
       } else {
-        // Send all task messages in parallel
-        await Promise.all(
-          tasks.map((task) => {
-            const msg = getResponse(lang, "task_item", {
-              task: task.task,
-              due_date: task.due_date,
-              remind_days: task.remind_days,
-            });
-            return sendMessage(userId, msg, getDeadlineKeyboard(task.id));
-          }),
+        // Consolidate all tasks into ONE message instead of sending 5 separate messages
+        let taskList = tasks
+          .map(
+            (task, index) =>
+              `${index + 1}. **${task.task}**\n   📅 ${task.due_date} | 🔔 ${task.remind_days}d`,
+          )
+          .join("\n\n");
+        await sendMessage(
+          userId,
+          `📝 **Your Tasks:**\n\n${taskList}`,
+          getMainKeyboard(),
         );
       }
       return;
@@ -1281,8 +1295,8 @@ export async function handler(event) {
       // Detect language based on text content
       const lang = text.match(/[а-яА-ЯёЁ]/) ? "ru" : "en";
 
-      // Save language first
-      await setUserLanguage(userId, lang);
+      // Save language in background (fire-and-forget) - doesn't block response
+      setUserLanguageAsync(userId, lang);
 
       // Handle payload from inline buttons
       if (payload) {

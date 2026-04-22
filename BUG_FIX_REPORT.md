@@ -18,7 +18,7 @@ Switched to a proper **IIFE (Immediately Invoked Function Expression)** pattern 
 handleMessage(userId, text, lang).catch((err) =>
   console.error("handleMessage error:", err.message),
 );
-return { statusCode: 200 };  // Returns immediately, function might terminate
+return { statusCode: 200 }; // Returns immediately, function might terminate
 
 // NEW (FIXED):
 (async () => {
@@ -28,22 +28,26 @@ return { statusCode: 200 };  // Returns immediately, function might terminate
     console.log(`[${userId}] Processing complete`);
   } catch (err) {
     console.error(`[${userId}] Processing error:`, err.message);
-    await sendMessage(userId, "❌ An error occurred. Please try again.", getMainKeyboard());
+    await sendMessage(
+      userId,
+      "❌ An error occurred. Please try again.",
+      getMainKeyboard(),
+    );
   }
 })();
 
-return { statusCode: 200 };  // VK gets response, but IIFE keeps running
+return { statusCode: 200 }; // VK gets response, but IIFE keeps running
 ```
 
 ## Key Improvements 🎯
 
-| Issue | Before | After |
-|-------|--------|-------|
-| Promise handling | Broken chain | Proper async/await |
-| Error recovery | Silent fail | Send error message to user |
-| Logging | Minimal | Detailed with user ID |
-| Function lifetime | Too short | Long enough to process |
-| User feedback | None | Error notification if fail |
+| Issue             | Before       | After                      |
+| ----------------- | ------------ | -------------------------- |
+| Promise handling  | Broken chain | Proper async/await         |
+| Error recovery    | Silent fail  | Send error message to user |
+| Logging           | Minimal      | Detailed with user ID      |
+| Function lifetime | Too short    | Long enough to process     |
+| User feedback     | None         | Error notification if fail |
 
 ## What Happens Now
 
@@ -57,7 +61,7 @@ return { statusCode: 200 };  // VK gets response, but IIFE keeps running
 
 ✅ **Committed and deployed to Netlify**  
 ✅ **Bot should now respond to all messages**  
-✅ **Better error handling and logging**  
+✅ **Better error handling and logging**
 
 Try sending a message now - it should work! 🎉
 
