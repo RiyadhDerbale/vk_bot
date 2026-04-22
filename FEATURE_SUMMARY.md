@@ -11,18 +11,18 @@
 
 ## 📊 Quick Stats
 
-| Metric | Value |
-|--------|-------|
-| Main Webhook File | 1,126 lines |
-| Response Templates | 35 (EN+RU) |
-| Menu Buttons | 8 main + 6 sub-menu |
-| Database Functions | 20+ |
-| Supported Commands | 9 (/add, /delete, /deadline, etc.) |
-| Natural Language Phrases | 20+ |
-| Payload Callbacks | 8 types |
-| Deployed Functions | 2 (webhook + scheduler) |
-| Database Tables | 6 |
-| Build Status | ✅ Passing |
+| Metric                   | Value                              |
+| ------------------------ | ---------------------------------- |
+| Main Webhook File        | 1,126 lines                        |
+| Response Templates       | 35 (EN+RU)                         |
+| Menu Buttons             | 8 main + 6 sub-menu                |
+| Database Functions       | 20+                                |
+| Supported Commands       | 9 (/add, /delete, /deadline, etc.) |
+| Natural Language Phrases | 20+                                |
+| Payload Callbacks        | 8 types                            |
+| Deployed Functions       | 2 (webhook + scheduler)            |
+| Database Tables          | 6                                  |
+| Build Status             | ✅ Passing                         |
 
 ---
 
@@ -31,6 +31,7 @@
 ### Core Features (ALL ✅ COMPLETE)
 
 #### 📅 Schedule Management
+
 - ✅ Add classes: `/add <subject> <day> <start> <end>`
 - ✅ Delete classes: `/delete <subject> <day> <start>`
 - ✅ View all schedule: "📅 Schedule" button
@@ -38,6 +39,7 @@
 - ✅ View tomorrow's classes: Natural language "tomorrow"
 
 #### 📝 Task Management
+
 - ✅ Add tasks/deadlines: `/deadline <task> <date> <days>`
 - ✅ View pending tasks: "📝 My tasks" button
 - ✅ Mark task done: ✅ Done button (inline)
@@ -45,12 +47,14 @@
 - ✅ Natural language: "What are my tasks?"
 
 #### ⏭️ Smart Scheduling
+
 - ✅ Show next class: "⏭️ What's next?" button
 - ✅ Show when it is: Today vs Tomorrow
 - ✅ Handle no classes: Graceful response
 - ✅ Time-aware logic: Checks current schedule
 
 #### 📊 Statistics & Analytics
+
 - ✅ Attendance rate: Calculate attended/total
 - ✅ Missed classes: Track absences
 - ✅ Task completion: Calculate done/total
@@ -58,6 +62,7 @@
 - ✅ Formatted display: With percentages & emojis
 
 #### 👁️ Attendance Tracking
+
 - ✅ Mark attended: ✅ Button
 - ✅ Mark missed: ❌ Button
 - ✅ Store in database: attendance table
@@ -65,6 +70,7 @@
 - ✅ Update statistics: Real-time refresh
 
 #### ⚙️ User Settings
+
 - ✅ Reminder offset: Configurable (5-120 min)
 - ✅ Interactive controls: ➖/➕ buttons
 - ✅ Persist changes: Save to database
@@ -72,6 +78,7 @@
 - ✅ User preferences: Per-user configuration
 
 #### 🌍 Bilingual Support
+
 - ✅ English detection: US keyboard, Latin letters
 - ✅ Russian detection: Cyrillic letters
 - ✅ Auto-switching: Based on first message
@@ -79,6 +86,7 @@
 - ✅ Button labels: Translated
 
 #### 🔔 Reminders & Notifications
+
 - ✅ Class reminders: 60-90 min before
 - ✅ Task reminders: X days before
 - ✅ Scheduled checker: Every 5 minutes
@@ -86,6 +94,7 @@
 - ✅ Configurable: User-set offset
 
 #### 💬 Natural Language Support
+
 - ✅ Schedule queries: "What's my schedule today?"
 - ✅ Task queries: "What are my tasks?"
 - ✅ Next class: "What's next?" / "Что дальше?"
@@ -93,6 +102,7 @@
 - ✅ Basic NLP: Keyword matching (scalable to AI)
 
 #### ❓ Help & Documentation
+
 - ✅ In-bot help: "❓ Help" button
 - ✅ Command guide: Format examples
 - ✅ Feature list: All capabilities shown
@@ -104,6 +114,7 @@
 ## 🔧 Technical Stack
 
 ### Backend Architecture
+
 ```
 VK Message → Netlify Function (vk-webhook.mjs)
                       ↓
@@ -122,6 +133,7 @@ VK Message → Netlify Function (vk-webhook.mjs)
 ```
 
 ### Database Schema
+
 - **users**: ID, name, language, reminder_offset
 - **schedule**: user_id, subject, day, start_time, end_time
 - **tasks**: id, user_id, task, due_date, remind_days, done
@@ -130,6 +142,7 @@ VK Message → Netlify Function (vk-webhook.mjs)
 - **study_logs**: user_id, activity, timestamp
 
 ### Deployment
+
 - **Platform**: Netlify Serverless Functions
 - **Runtime**: Node.js 18+
 - **Database**: Supabase PostgreSQL
@@ -141,17 +154,20 @@ VK Message → Netlify Function (vk-webhook.mjs)
 ## 📋 Command Reference
 
 ### Schedule Commands
+
 ```
 /add Math 1 10:30 12:05          → Add Math on Tuesday, 10:30-12:05
 /delete Math 1 10:30             → Delete that class
 ```
 
 ### Task Commands
+
 ```
 /deadline Report 2025-12-20 12:00 2    → Add report due Dec 20, remind 2 days before
 ```
 
 ### Button Commands
+
 ```
 📅 Schedule          → Show all classes
 📋 Today             → Show today's classes
@@ -169,22 +185,23 @@ VK Message → Netlify Function (vk-webhook.mjs)
 
 ### New in Version 2.0
 
-| Feature | Added | Benefit |
-|---------|-------|---------|
-| Today's Classes | ✅ | Quick daily check |
-| What's Next? | ✅ | Never miss class |
-| Statistics | ✅ | Track progress |
-| Attendance Marks | ✅ | Academic records |
-| Settings Controls | ✅ | User customization |
-| Task Snooze | ✅ | Flexible scheduling |
-| Natural Language | ✅ | Easy queries |
-| Modular Add Menu | ✅ | Better UX |
+| Feature           | Added | Benefit             |
+| ----------------- | ----- | ------------------- |
+| Today's Classes   | ✅    | Quick daily check   |
+| What's Next?      | ✅    | Never miss class    |
+| Statistics        | ✅    | Track progress      |
+| Attendance Marks  | ✅    | Academic records    |
+| Settings Controls | ✅    | User customization  |
+| Task Snooze       | ✅    | Flexible scheduling |
+| Natural Language  | ✅    | Easy queries        |
+| Modular Add Menu  | ✅    | Better UX           |
 
 ---
 
 ## 🚀 Deployment Info
 
 ### Environment Variables Required
+
 ```
 VK_TOKEN = Your VK API access token
 VK_CONFIRMATION_TOKEN = df7d544c
@@ -193,6 +210,7 @@ SUPABASE_KEY = Your anonymous JWT key
 ```
 
 ### Netlify Status
+
 - ✅ Build: Passing
 - ✅ Deploy: Automatic
 - ✅ Functions: 2 active
@@ -200,6 +218,7 @@ SUPABASE_KEY = Your anonymous JWT key
 - ✅ Performance: Good
 
 ### Database Status
+
 - ✅ Connected: Supabase
 - ✅ Schema: Initialized
 - ✅ RLS: Enabled
@@ -211,18 +230,21 @@ SUPABASE_KEY = Your anonymous JWT key
 ## 📈 Performance Metrics
 
 ### Response Times
+
 - Button click → Response: ~100-150ms
 - Command parse → Execute: ~150-200ms
 - Database query: ~50-100ms
 - Total request cycle: ~200-300ms
 
 ### Reliability
+
 - Availability: 99.99% uptime
 - Error rate: <0.1% (network issues)
 - Successful commands: >99%
 - Reminder accuracy: 100%
 
 ### Scalability
+
 - Concurrent users: Unlimited (serverless)
 - Daily active users: 1,000+ (tested)
 - Requests/min: 10,000+ capacity
@@ -233,6 +255,7 @@ SUPABASE_KEY = Your anonymous JWT key
 ## 🧪 Testing Status
 
 ### Manual Tests Completed
+
 - ✅ All 8 main menu buttons
 - ✅ All command formats
 - ✅ Natural language queries
@@ -243,6 +266,7 @@ SUPABASE_KEY = Your anonymous JWT key
 - ✅ Reminder scheduling
 
 ### Test Results
+
 - **Pass Rate:** 100%
 - **Edge Cases:** Handled
 - **Error Messages:** Clear
@@ -252,22 +276,23 @@ SUPABASE_KEY = Your anonymous JWT key
 
 ## 📚 Documentation Files
 
-| File | Purpose |
-|------|---------|
-| ENHANCED_FEATURES.md | New V2 features guide |
-| MIGRATION_TO_V2.md | Upgrade documentation |
+| File                    | Purpose               |
+| ----------------------- | --------------------- |
+| ENHANCED_FEATURES.md    | New V2 features guide |
+| MIGRATION_TO_V2.md      | Upgrade documentation |
 | FEATURES_IMPLEMENTED.md | Complete feature list |
-| TESTING_GUIDE.md | How to test |
-| PROJECT_SUMMARY.md | Architecture overview |
-| vk-webhook.mjs | Main webhook code |
-| check-reminders.mjs | Scheduler code |
-| SUPABASE_SCHEMA.sql | Database setup |
+| TESTING_GUIDE.md        | How to test           |
+| PROJECT_SUMMARY.md      | Architecture overview |
+| vk-webhook.mjs          | Main webhook code     |
+| check-reminders.mjs     | Scheduler code        |
+| SUPABASE_SCHEMA.sql     | Database setup        |
 
 ---
 
 ## 🛠️ Development Info
 
 ### Code Quality
+
 - ✅ No syntax errors
 - ✅ All functions documented
 - ✅ Error handling: 95% coverage
@@ -275,6 +300,7 @@ SUPABASE_KEY = Your anonymous JWT key
 - ✅ Consistent formatting
 
 ### Architecture Quality
+
 - ✅ Modular design
 - ✅ Reusable functions
 - ✅ Clean separation of concerns
@@ -282,6 +308,7 @@ SUPABASE_KEY = Your anonymous JWT key
 - ✅ Maintainable codebase
 
 ### Best Practices
+
 - ✅ Proper error handling (try-catch)
 - ✅ Input validation
 - ✅ SQL injection protection (Supabase)
@@ -293,6 +320,7 @@ SUPABASE_KEY = Your anonymous JWT key
 ## 🔮 Future Roadmap
 
 ### Phase 3 (Planned)
+
 - [ ] ICS calendar file upload
 - [ ] AI-powered NLP
 - [ ] Class location tracking
@@ -300,6 +328,7 @@ SUPABASE_KEY = Your anonymous JWT key
 - [ ] Performance analytics dashboard
 
 ### Phase 4 (Roadmap)
+
 - [ ] Integration with Google Calendar
 - [ ] Mobile app companion
 - [ ] Group study rooms
@@ -321,6 +350,7 @@ SUPABASE_KEY = Your anonymous JWT key
 ## 💡 Tips for Users
 
 ### Getting Started
+
 1. Add classes with `/add` command
 2. Set reminder offset in Settings
 3. Check today's schedule with "📋 Today"
@@ -328,6 +358,7 @@ SUPABASE_KEY = Your anonymous JWT key
 5. View progress in Statistics
 
 ### Pro Tips
+
 - Use natural language for quick queries
 - Snooze tasks instead of deleting
 - Check "What's next?" before each day
@@ -337,13 +368,15 @@ SUPABASE_KEY = Your anonymous JWT key
 ### Common Use Cases
 
 **Daily Workflow:**
+
 ```
-Morning: 📋 Today → ⏭️ What's next? 
+Morning: 📋 Today → ⏭️ What's next?
 After class: ✅ Mark attended
 Evening: 📊 Statistics → ⚙️ Settings
 ```
 
 **Weekly Workflow:**
+
 ```
 Monday: Add week's classes with /add
 During week: ✅ Mark attendance
@@ -356,15 +389,17 @@ Sunday: Adjust settings for next week
 ## 📞 Support & Issues
 
 ### Quick Troubleshooting
-| Issue | Solution |
-|-------|----------|
-| Bot not responding | Check VK_TOKEN in Netlify |
-| Buttons not working | Verify webhook is receiving events |
-| Stats showing 0 | Mark attendance after class |
-| Reminders not coming | Check reminder_offset value |
-| Language wrong | Send message in different language |
+
+| Issue                | Solution                           |
+| -------------------- | ---------------------------------- |
+| Bot not responding   | Check VK_TOKEN in Netlify          |
+| Buttons not working  | Verify webhook is receiving events |
+| Stats showing 0      | Mark attendance after class        |
+| Reminders not coming | Check reminder_offset value        |
+| Language wrong       | Send message in different language |
 
 ### Debug Commands
+
 ```javascript
 // Check user profile
 const user = await getUser(userId);
@@ -401,7 +436,7 @@ const tasks = await getTasks(userId);
 **Status:** FULLY FUNCTIONAL ✅  
 **Deployment:** LIVE ✅  
 **Testing:** COMPLETE ✅  
-**Documentation:** COMPREHENSIVE ✅  
+**Documentation:** COMPREHENSIVE ✅
 
 The bot is production-ready and can handle thousands of concurrent users. All features are implemented, tested, and deployed.
 
