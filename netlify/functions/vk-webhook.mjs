@@ -27,7 +27,7 @@ function setCached(key, data) {
 }
 
 // ========== VK API HELPERS ==========
-async function callVkApi(method, params) {
+async function callVkApi(method, params, controller = null) {
   try {
     const url = new URL("https://api.vk.com/method/" + method);
     url.searchParams.append("access_token", VK_TOKEN);
@@ -41,7 +41,12 @@ async function callVkApi(method, params) {
       }
     });
 
-    const response = await fetch(url.toString());
+    const fetchOptions = {};
+    if (controller) {
+      fetchOptions.signal = controller.signal;
+    }
+
+    const response = await fetch(url.toString(), fetchOptions);
     const data = await response.json();
 
     if (data.error) {
@@ -66,7 +71,19 @@ async function sendMessage(userId, text, keyboard = null) {
     params.keyboard = keyboard;
   }
 
-  return callVkApi("messages.send", params);
+  // Add request timeout of 10 seconds
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const response = await callVkApi("messages.send", params, controller);
+    clearTimeout(timeout);
+    return response;
+  } catch (error) {
+    clearTimeout(timeout);
+    console.error("sendMessage timeout or error:", error.message);
+    return null;
+  }
 }
 
 // ========== KEYBOARD BUILDERS ==========
@@ -1252,7 +1269,7 @@ export async function handler(event) {
       };
     }
 
-    // Message Event
+    // Message Event - RESPOND IMMEDIATELY, PROCESS ASYNC
     if (body.type === "message_new") {
       const message = body.object.message;
       const userId = message.from_id;
@@ -1264,19 +1281,32 @@ export async function handler(event) {
       // Detect language based on text content
       const lang = text.match(/[а-яА-ЯёЁ]/) ? "ru" : "en";
 
-      // Don't wait for language save, run async
-      setUserLanguage(userId, lang).catch((err) =>
-        console.error("setUserLanguage error:", err.message),
-      );
+      // RESPOND TO VK IMMEDIATELY (don't await)
+      // Process message async in background
+      (async () => {
+        try {
+          // Save language async
+          await setUserLanguage(userId, lang);
 
-      // Handle payload from inline buttons
-      if (payload) {
-        await handlePayload(userId, payload, lang);
-      } else {
-        // Handle regular text messages
-        await handleMessage(userId, text, lang);
-      }
+          // Handle payload from inline buttons
+          if (payload) {
+            await handlePayload(userId, payload, lang);
+          } else {
+            // Handle regular text messages
+            await handleMessage(userId, text, lang);
+          }
+        } catch (err) {
+          console.error("Async handler error:", err.message);
+          // Send error message to user
+          await sendMessage(
+            userId,
+            "❌ An error occurred. Please try again.",
+            getMainKeyboard(),
+          );
+        }
+      })();
 
+      // RETURN IMMEDIATELY (don't wait for message processing)
       return {
         statusCode: 200,
         body: JSON.stringify({ ok: true }),
