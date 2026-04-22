@@ -240,12 +240,13 @@ async function setUserLanguage(userId, language) {
 
 // Fire-and-forget version (doesn't block)
 function setUserLanguageAsync(userId, language) {
-  supabase
-    .from("users")
-    .upsert({ vk_id: userId, language }, { onConflict: "vk_id" })
-    .catch((error) =>
-      console.error("setUserLanguageAsync error:", error.message),
-    );
+  try {
+    supabase
+      .from("users")
+      .upsert({ vk_id: userId, language }, { onConflict: "vk_id" });
+  } catch (error) {
+    console.error("setUserLanguageAsync error:", error.message);
+  }
 }
 
 async function getUserName(userId) {
