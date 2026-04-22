@@ -1281,23 +1281,41 @@ export async function handler(event) {
       // Detect language based on text content
       const lang = text.match(/[а-яА-ЯёЁ]/) ? "ru" : "en";
 
-      // Save language (fire and forget, no await)
-      setUserLanguage(userId, lang).catch((err) =>
-        console.error("setUserLanguage error:", err.message),
-      );
+      // Process message in background but don't wait
+      // Fire and forget with error handling
+      (async () => {
+        try {
+          console.log(`[${userId}] Processing message...`);
+          
+          // Save language
+          await setUserLanguage(userId, lang);
 
-      // Handle payload from inline buttons
-      if (payload) {
-        handlePayload(userId, payload, lang).catch((err) =>
-          console.error("handlePayload error:", err.message),
-        );
-      } else {
-        // Handle regular text messages
-        handleMessage(userId, text, lang).catch((err) =>
-          console.error("handleMessage error:", err.message),
-        );
-      }
+          // Handle payload from inline buttons
+          if (payload) {
+            console.log(`[${userId}] Handling payload: ${payload.cmd}`);
+            await handlePayload(userId, payload, lang);
+          } else {
+            // Handle regular text messages
+            console.log(`[${userId}] Handling message: ${text.substring(0, 50)}`);
+            await handleMessage(userId, text, lang);
+          }
+          
+          console.log(`[${userId}] Processing complete`);
+        } catch (err) {
+          console.error(`[${userId}] Processing error:`, err.message);
+          try {
+            await sendMessage(
+              userId,
+              "❌ An error occurred. Please try again.",
+              getMainKeyboard(),
+            );
+          } catch (sendErr) {
+            console.error(`[${userId}] Failed to send error message:`, sendErr.message);
+          }
+        }
+      })();
 
+      // Return immediately to VK
       return {
         statusCode: 200,
         body: JSON.stringify({ ok: true }),
