@@ -9,6 +9,23 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const VK_TOKEN = process.env.VK_TOKEN;
 const VK_API_VERSION = "5.131";
 
+// ========== CACHING ==========
+const cache = new Map();
+const CACHE_TTL = 5000; // 5 seconds
+
+function getCached(key) {
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
+  }
+  cache.delete(key);
+  return null;
+}
+
+function setCached(key, data) {
+  cache.set(key, { data, timestamp: Date.now() });
+}
+
 // ========== VK API HELPERS ==========
 async function callVkApi(method, params) {
   try {
@@ -206,12 +223,18 @@ async function setUserLanguage(userId, language) {
 
 async function getUserName(userId) {
   try {
+    const cacheKey = `name_${userId}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
     const { data } = await supabase
       .from("users")
       .select("name")
       .eq("vk_id", userId)
       .single();
-    return data?.name || "friend";
+    const name = data?.name || "friend";
+    setCached(cacheKey, name);
+    return name;
   } catch (error) {
     console.error("getUserName error:", error.message);
     return "friend";
@@ -220,12 +243,18 @@ async function getUserName(userId) {
 
 async function getUserOffset(userId) {
   try {
+    const cacheKey = `offset_${userId}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
     const { data } = await supabase
       .from("users")
       .select("notify_offset")
       .eq("vk_id", userId)
       .single();
-    return data?.notify_offset || 60;
+    const offset = data?.notify_offset || 60;
+    setCached(cacheKey, offset);
+    return offset;
   } catch (error) {
     console.error("getUserOffset error:", error.message);
     return 60;
@@ -249,12 +278,18 @@ async function setUserOffset(userId, minutes) {
 
 async function getSchedule(userId) {
   try {
+    const cacheKey = `schedule_${userId}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
     const { data } = await supabase
       .from("schedule")
       .select("id, subject, day, start_time, end_time")
       .eq("user_id", userId)
       .order("day", { ascending: true });
-    return data || [];
+    const result = data || [];
+    setCached(cacheKey, result);
+    return result;
   } catch (error) {
     console.error("getSchedule error:", error.message);
     return [];
@@ -297,14 +332,23 @@ async function deleteSchedule(userId, subject, day, startTime) {
 
 async function getTasks(userId, onlyPending = true) {
   try {
-    let query = supabase.from("tasks").select("id, task, due_date, remind_days, done").eq("user_id", userId);
+    const cacheKey = `tasks_${userId}_${onlyPending}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
+    let query = supabase
+      .from("tasks")
+      .select("id, task, due_date, remind_days, done")
+      .eq("user_id", userId);
 
     if (onlyPending) {
       query = query.eq("done", false);
     }
 
     const { data } = await query.order("due_date", { ascending: true });
-    return data || [];
+    const result = data || [];
+    setCached(cacheKey, result);
+    return result;
   } catch (error) {
     console.error("getTasks error:", error.message);
     return [];
@@ -365,13 +409,19 @@ async function markAttendance(classId, userId, attended) {
 
 async function getAttendanceStats(userId) {
   try {
+    const cacheKey = `att_stats_${userId}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
     const { data } = await supabase
       .from("attendance")
       .select("attended")
       .eq("user_id", userId);
 
     if (!data || data.length === 0) {
-      return { total: 0, attended: 0, missed: 0, percentage: 0 };
+      const result = { total: 0, attended: 0, missed: 0, percentage: 0 };
+      setCached(cacheKey, result);
+      return result;
     }
 
     const total = data.length;
@@ -379,7 +429,9 @@ async function getAttendanceStats(userId) {
     const missed = total - attended;
     const percentage = Math.round((attended / total) * 100);
 
-    return { total, attended, missed, percentage };
+    const result = { total, attended, missed, percentage };
+    setCached(cacheKey, result);
+    return result;
   } catch (error) {
     console.error("getAttendanceStats error:", error.message);
     return { total: 0, attended: 0, missed: 0, percentage: 0 };
@@ -388,13 +440,19 @@ async function getAttendanceStats(userId) {
 
 async function getTaskStats(userId) {
   try {
+    const cacheKey = `task_stats_${userId}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
     const { data } = await supabase
       .from("tasks")
       .select("done")
       .eq("user_id", userId);
 
     if (!data || data.length === 0) {
-      return { total: 0, completed: 0, pending: 0, completion: 0 };
+      const result = { total: 0, completed: 0, pending: 0, completion: 0 };
+      setCached(cacheKey, result);
+      return result;
     }
 
     const total = data.length;
@@ -402,7 +460,9 @@ async function getTaskStats(userId) {
     const pending = total - completed;
     const completion = Math.round((completed / total) * 100);
 
-    return { total, completed, pending, completion };
+    const result = { total, completed, pending, completion };
+    setCached(cacheKey, result);
+    return result;
   } catch (error) {
     console.error("getTaskStats error:", error.message);
     return { total: 0, completed: 0, pending: 0, completion: 0 };
@@ -784,14 +844,17 @@ async function handleMessage(userId, text, lang) {
           getMainKeyboard(),
         );
       } else {
-        for (const task of tasks) {
-          const msg = getResponse(lang, "task_item", {
-            task: task.task,
-            due_date: task.due_date,
-            remind_days: task.remind_days,
-          });
-          await sendMessage(userId, msg, getDeadlineKeyboard(task.id));
-        }
+        // Send all task messages in parallel
+        await Promise.all(
+          tasks.map((task) => {
+            const msg = getResponse(lang, "task_item", {
+              task: task.task,
+              due_date: task.due_date,
+              remind_days: task.remind_days,
+            });
+            return sendMessage(userId, msg, getDeadlineKeyboard(task.id));
+          }),
+        );
       }
       return;
     }
@@ -1200,10 +1263,10 @@ export async function handler(event) {
 
       // Detect language based on text content
       const lang = text.match(/[а-яА-ЯёЁ]/) ? "ru" : "en";
-      
+
       // Don't wait for language save, run async
-      setUserLanguage(userId, lang).catch(err => 
-        console.error("setUserLanguage error:", err.message)
+      setUserLanguage(userId, lang).catch((err) =>
+        console.error("setUserLanguage error:", err.message),
       );
 
       // Handle payload from inline buttons
