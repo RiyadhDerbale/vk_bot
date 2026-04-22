@@ -1269,7 +1269,7 @@ export async function handler(event) {
       };
     }
 
-    // Message Event - RESPOND IMMEDIATELY, PROCESS ASYNC
+    // Message Event
     if (body.type === "message_new") {
       const message = body.object.message;
       const userId = message.from_id;
@@ -1281,32 +1281,23 @@ export async function handler(event) {
       // Detect language based on text content
       const lang = text.match(/[а-яА-ЯёЁ]/) ? "ru" : "en";
 
-      // RESPOND TO VK IMMEDIATELY (don't await)
-      // Process message async in background
-      (async () => {
-        try {
-          // Save language async
-          await setUserLanguage(userId, lang);
+      // Save language (fire and forget, no await)
+      setUserLanguage(userId, lang).catch((err) =>
+        console.error("setUserLanguage error:", err.message),
+      );
 
-          // Handle payload from inline buttons
-          if (payload) {
-            await handlePayload(userId, payload, lang);
-          } else {
-            // Handle regular text messages
-            await handleMessage(userId, text, lang);
-          }
-        } catch (err) {
-          console.error("Async handler error:", err.message);
-          // Send error message to user
-          await sendMessage(
-            userId,
-            "❌ An error occurred. Please try again.",
-            getMainKeyboard(),
-          );
-        }
-      })();
+      // Handle payload from inline buttons
+      if (payload) {
+        handlePayload(userId, payload, lang).catch((err) =>
+          console.error("handlePayload error:", err.message),
+        );
+      } else {
+        // Handle regular text messages
+        handleMessage(userId, text, lang).catch((err) =>
+          console.error("handleMessage error:", err.message),
+        );
+      }
 
-      // RETURN IMMEDIATELY (don't wait for message processing)
       return {
         statusCode: 200,
         body: JSON.stringify({ ok: true }),

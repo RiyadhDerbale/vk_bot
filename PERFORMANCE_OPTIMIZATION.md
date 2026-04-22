@@ -13,6 +13,7 @@
 ### The Fix: Async-First Response Pattern
 
 **Before (BLOCKING):**
+
 ```
 VK sends message
   ↓
@@ -22,9 +23,11 @@ Server sends response to VK
   ↓
 VK receives response
 ```
+
 **Problem:** User had to wait for ALL processing before VK acknowledged the message
 
 **After (NON-BLOCKING):**
+
 ```
 VK sends message
   ↓
@@ -42,8 +45,9 @@ Bot sends response to user (while VK is free to handle other requests)
 ## Code Changes Made
 
 ### 1. Webhook Handler - Return Immediately
+
 ```javascript
-// OLD: await handleMessage(...) 
+// OLD: await handleMessage(...)
 // NEW: Process async, return immediately
 (async () => {
   try {
@@ -64,6 +68,7 @@ return { statusCode: 200, body: JSON.stringify({ ok: true }) };
 **Benefit:** VK gets response in <50ms, processing happens in background
 
 ### 2. Request Timeout Protection
+
 ```javascript
 async function sendMessage(userId, text, keyboard = null) {
   const controller = new AbortController();
@@ -83,6 +88,7 @@ async function sendMessage(userId, text, keyboard = null) {
 **Benefit:** Prevents hanging requests from blocking forever
 
 ### 3. Parallel Task Loading
+
 ```javascript
 // Load multiple tasks in parallel
 await Promise.all(
@@ -101,28 +107,29 @@ await Promise.all(
 
 ### Response Times (Before → After)
 
-| Operation | Before | After | Improvement |
-|-----------|--------|-------|-------------|
-| VK confirmation | 50ms | 10ms | 80% faster |
-| Simple message | 500ms | 150ms | 70% faster |
-| Task list (5 tasks) | 2000ms | 300ms | 85% faster |
-| Statistics | 1500ms | 200ms | 87% faster |
-| What's next | 800ms | 180ms | 77% faster |
+| Operation           | Before | After | Improvement |
+| ------------------- | ------ | ----- | ----------- |
+| VK confirmation     | 50ms   | 10ms  | 80% faster  |
+| Simple message      | 500ms  | 150ms | 70% faster  |
+| Task list (5 tasks) | 2000ms | 300ms | 85% faster  |
+| Statistics          | 1500ms | 200ms | 87% faster  |
+| What's next         | 800ms  | 180ms | 77% faster  |
 
 ### VK Server Impact
 
-| Metric | Before | After |
-|--------|--------|-------|
-| VK timeout risk | HIGH | NONE |
+| Metric           | Before          | After       |
+| ---------------- | --------------- | ----------- |
+| VK timeout risk  | HIGH            | NONE        |
 | Server CPU usage | High (blocking) | Low (async) |
-| Concurrent users | ~10 | 1000+ |
-| Cost | Higher | Lower |
+| Concurrent users | ~10             | 1000+       |
+| Cost             | Higher          | Lower       |
 
 ---
 
 ## How It Works Now
 
 ### Fast Path (Always <100ms)
+
 ```
 1. VK sends webhook
 2. Parse message
@@ -132,6 +139,7 @@ await Promise.all(
 ```
 
 ### Background Processing (In parallel)
+
 ```
 1. Detect language
 2. Query database
@@ -148,7 +156,7 @@ await Promise.all(
 ✅ **No timeout errors** - Bot won't fail on complex requests  
 ✅ **Better UX** - Feels faster and more responsive  
 ✅ **More users** - Can handle 10x more concurrent users  
-✅ **Lower latency** - Processing happens while VK is idle  
+✅ **Lower latency** - Processing happens while VK is idle
 
 ---
 
@@ -177,6 +185,7 @@ For even faster performance, we could add:
 ## Testing Results
 
 ### Load Test Scenario
+
 ```
 - 100 concurrent users
 - Each sends /add command
@@ -188,6 +197,7 @@ For even faster performance, we could add:
 **Before:** Would fail or timeout
 
 ### Stress Test
+
 ```
 - 1000 rapid messages
 - Mixed command types
@@ -204,9 +214,10 @@ For even faster performance, we could add:
 ✅ Changes committed to main branch  
 ✅ Netlify auto-deploying  
 ✅ Zero downtime migration  
-✅ Backwards compatible  
+✅ Backwards compatible
 
 **When it's live:**
+
 - Users will see instant message delivery
 - No more "Bot is slow" complaints
 - 10x more reliable
@@ -226,6 +237,7 @@ For even faster performance, we could add:
 ### Error Handling
 
 If processing fails:
+
 - Error is logged
 - User gets notification
 - No VK timeout
@@ -236,6 +248,7 @@ If processing fails:
 ## Future Optimizations (Optional)
 
 **Priority 1: Redis Cache** (10-15 min implementation)
+
 ```javascript
 // Cache user schedule for 5 minutes
 const cacheKey = `schedule:${userId}`;
@@ -245,25 +258,31 @@ if (!schedule) {
   await redis.setex(cacheKey, 300, JSON.stringify(schedule));
 }
 ```
+
 Expected: 70% faster for cached queries
 
 **Priority 2: Batch Database Queries** (20-30 min)
+
 ```javascript
 // Load all user data in one query
 const user = await supabase
-  .from('users')
-  .select(`
+  .from("users")
+  .select(
+    `
     *,
     schedule(*),
     tasks(*),
     attendance(*)
-  `)
-  .eq('vk_id', userId)
+  `,
+  )
+  .eq("vk_id", userId)
   .single();
 ```
+
 Expected: 40% faster overall
 
 **Priority 3: CDN for Responses** (already done by Netlify)
+
 - Responses cached globally
 - No need for optimization
 
@@ -272,6 +291,7 @@ Expected: 40% faster overall
 ## Monitoring & Logs
 
 Check Netlify function logs:
+
 ```
 User message: "📝 My tasks"
 → Response sent to VK: 45ms
@@ -285,13 +305,13 @@ User message: "📝 My tasks"
 
 ## Summary
 
-| Before | After |
-|--------|-------|
-| 🐢 Slow | ⚡ Fast |
+| Before               | After              |
+| -------------------- | ------------------ |
+| 🐢 Slow              | ⚡ Fast            |
 | ⏱️ Timeouts possible | ✅ Never times out |
-| 😞 Poor UX | 😊 Great UX |
-| 10 users max | 1000+ users |
-| High latency | Sub-100ms response |
+| 😞 Poor UX           | 😊 Great UX        |
+| 10 users max         | 1000+ users        |
+| High latency         | Sub-100ms response |
 
 **Status:** ✅ **PRODUCTION READY**
 
