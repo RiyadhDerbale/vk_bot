@@ -596,6 +596,120 @@ async function getNextClass(userId) {
   }
 }
 
+// ========== ICS PARSING & UPLOAD ==========
+async function parseIcsAndSave(userId, icsContent, lang) {
+  try {
+    const lines = icsContent.split("\n");
+    const events = [];
+    let currentEvent = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+
+      if (line === "BEGIN:VEVENT") {
+        currentEvent = {};
+      } else if (line === "END:VEVENT" && currentEvent) {
+        events.push(currentEvent);
+        currentEvent = null;
+      } else if (currentEvent) {
+        if (line.startsWith("SUMMARY:")) {
+          currentEvent.subject = line.substring(8);
+        } else if (line.startsWith("DTSTART")) {
+          const match = line.match(/DTSTART(?:.*?):(\d{8}T\d{6})?(\d{8})?/);
+          if (match && match[1]) {
+            currentEvent.startDateTime = match[1];
+          } else if (match && match[2]) {
+            currentEvent.startDate = match[2];
+          }
+        } else if (line.startsWith("DTEND")) {
+          const match = line.match(/DTEND(?:.*?):(\d{8}T\d{6})?(\d{8})?/);
+          if (match && match[1]) {
+            currentEvent.endDateTime = match[1];
+          } else if (match && match[2]) {
+            currentEvent.endDate = match[2];
+          }
+        }
+      }
+    }
+
+    // Convert events to schedule entries
+    let addedCount = 0;
+
+    for (const event of events) {
+      if (!event.subject) continue;
+
+      let startTime = "09:00";
+      let endTime = "10:00";
+      let dayOfWeek = 0;
+
+      // Parse datetime if available
+      if (event.startDateTime) {
+        const dateStr = event.startDateTime.substring(0, 8);
+        const timeStr = event.startDateTime.substring(9, 15);
+        const year = parseInt(dateStr.substring(0, 4));
+        const month = parseInt(dateStr.substring(4, 6));
+        const day = parseInt(dateStr.substring(6, 8));
+        const hour = parseInt(timeStr.substring(0, 2));
+        const minute = parseInt(timeStr.substring(2, 4));
+
+        const date = new Date(year, month - 1, day, hour, minute);
+        dayOfWeek = date.getDay() === 0 ? 6 : date.getDay() - 1;
+        startTime = `${String(hour).padStart(2, "0")}:${String(minute).padStart(
+          2,
+          "0",
+        )}`;
+      }
+
+      if (event.endDateTime) {
+        const timeStr = event.endDateTime.substring(9, 15);
+        const hour = parseInt(timeStr.substring(0, 2));
+        const minute = parseInt(timeStr.substring(2, 4));
+        endTime = `${String(hour).padStart(2, "0")}:${String(minute).padStart(
+          2,
+          "0",
+        )}`;
+      }
+
+      // Add to database
+      const success = await addSchedule(
+        userId,
+        event.subject,
+        dayOfWeek,
+        startTime,
+        endTime,
+      );
+      if (success) addedCount++;
+    }
+
+    return addedCount;
+  } catch (error) {
+    console.error("parseIcsAndSave error:", error.message);
+    return 0;
+  }
+}
+
+async function downloadAndParseIcs(userId, url, lang) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      throw new Error(`Failed to download ICS: ${response.status}`);
+    }
+
+    const icsContent = await response.text();
+    const addedCount = await parseIcsAndSave(userId, icsContent, lang);
+
+    return { success: true, count: addedCount };
+  } catch (error) {
+    console.error("downloadAndParseIcs error:", error.message);
+    return { success: false, count: 0, error: error.message };
+  }
+}
+
 // ========== RESPONSE TEMPLATES ==========
 const responses = {
   en: {
@@ -1095,6 +1209,59 @@ async function handleMessage(userId, text, lang) {
           lang === "ru"
             ? "📝 Отправьте: /deadline <задача> <YYYY-MM-DD ЧЧ:ММ> <дни>"
             : "📝 Send: /deadline <task> <YYYY-MM-DD HH:MM> <days>",
+          getMainKeyboard(),
+        );
+      }
+      return;
+    }
+
+    // /upload command - Import ICS calendar
+    if (lowText.startsWith("/upload")) {
+      const parts = text.split(" ");
+      if (parts.length >= 2) {
+        const url = parts.slice(1).join(" ");
+
+        await sendMessage(
+          userId,
+          lang === "ru"
+            ? "📥 Загружаю календарь... Пожалуйста, подождите."
+            : "📥 Importing calendar... Please wait.",
+          getMainKeyboard(),
+        );
+
+        const result = await downloadAndParseIcs(userId, url, lang);
+
+        if (result.success && result.count > 0) {
+          await sendMessage(
+            userId,
+            lang === "ru"
+              ? `✅ Успешно добавлено ${result.count} занятий в расписание!`
+              : `✅ Successfully added ${result.count} classes to your schedule!`,
+            getMainKeyboard(),
+          );
+        } else if (result.success && result.count === 0) {
+          await sendMessage(
+            userId,
+            lang === "ru"
+              ? "⚠️ Календарь пуст или не содержит события."
+              : "⚠️ Calendar is empty or contains no events.",
+            getMainKeyboard(),
+          );
+        } else {
+          await sendMessage(
+            userId,
+            lang === "ru"
+              ? `❌ Ошибка импорта календаря: ${result.error}`
+              : `❌ Failed to import calendar: ${result.error}`,
+            getMainKeyboard(),
+          );
+        }
+      } else {
+        await sendMessage(
+          userId,
+          lang === "ru"
+            ? "📝 Отправьте: /upload <ссылка на календарь .ics>\n\nПример: /upload https://example.com/calendar.ics"
+            : "📝 Send: /upload <link to .ics calendar>\n\nExample: /upload https://example.com/calendar.ics",
           getMainKeyboard(),
         );
       }
