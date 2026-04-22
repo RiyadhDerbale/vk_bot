@@ -59,18 +59,37 @@ function getMainKeyboard() {
     buttons: [
       [
         { action: { type: "text", label: "📅 Schedule" }, color: "primary" },
-        { action: { type: "text", label: "➕ Add class" }, color: "positive" },
+        { action: { type: "text", label: "📋 Today" }, color: "positive" },
       ],
       [
-        { action: { type: "text", label: "📝 My tasks" }, color: "secondary" },
+        { action: { type: "text", label: "⏭️ What's next?" }, color: "secondary" },
+        { action: { type: "text", label: "📝 My tasks" }, color: "positive" },
+      ],
+      [
+        { action: { type: "text", label: "� Statistics" }, color: "secondary" },
+        { action: { type: "text", label: "⚙️ Settings" }, color: "primary" },
+      ],
+      [
+        { action: { type: "text", label: "➕ Add" }, color: "positive" },
+        { action: { type: "text", label: "❓ Help" }, color: "secondary" },
+      ],
+    ],
+  });
+}
+
+function getAddKeyboard() {
+  return JSON.stringify({
+    one_time: false,
+    buttons: [
+      [
+        { action: { type: "text", label: "📅 Add Class" }, color: "positive" },
         {
-          action: { type: "text", label: "➕ Add deadline" },
+          action: { type: "text", label: "📝 Add Task" },
           color: "positive",
         },
       ],
       [
-        { action: { type: "text", label: "⚙️ Settings" }, color: "secondary" },
-        { action: { type: "text", label: "❓ Help" }, color: "primary" },
+        { action: { type: "text", label: "🔙 Back" }, color: "secondary" },
       ],
     ],
   });
@@ -89,6 +108,40 @@ function getDeadlineKeyboard(taskId) {
           },
           color: "positive",
         },
+        {
+          action: {
+            type: "callback",
+            label: "⏸️ Snooze",
+            payload: JSON.stringify({ cmd: "snooze_task", did: taskId }),
+          },
+          color: "secondary",
+        },
+      ],
+    ],
+  });
+}
+
+function getAttendanceKeyboard(classId) {
+  return JSON.stringify({
+    inline: true,
+    buttons: [
+      [
+        {
+          action: {
+            type: "callback",
+            label: "✅ Attended",
+            payload: JSON.stringify({ cmd: "mark_attended", cid: classId }),
+          },
+          color: "positive",
+        },
+        {
+          action: {
+            type: "callback",
+            label: "❌ Missed",
+            payload: JSON.stringify({ cmd: "mark_missed", cid: classId }),
+          },
+          color: "negative",
+        },
       ],
     ],
   });
@@ -100,11 +153,21 @@ function getSettingsKeyboard(offset) {
     buttons: [
       [
         {
-          action: { type: "text", label: `⏰ Offset: ${offset} min` },
+          action: { type: "callback", label: "➖", payload: JSON.stringify({ cmd: "offset_down" }) },
+          color: "negative",
+        },
+        {
+          action: { type: "text", label: `${offset} min` },
           color: "primary",
         },
+        {
+          action: { type: "callback", label: "➕", payload: JSON.stringify({ cmd: "offset_up" }) },
+          color: "positive",
+        },
       ],
-      [{ action: { type: "text", label: "🔙 Back" }, color: "secondary" }],
+      [
+        { action: { type: "text", label: "🔙 Back" }, color: "secondary" },
+      ],
     ],
   });
 }
@@ -273,74 +336,251 @@ async function completeTask(taskId, userId) {
   }
 }
 
+async function markAttendance(classId, userId, attended) {
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const { error } = await supabase.from("attendance").upsert(
+      {
+        user_id: userId,
+        class_id: classId,
+        attended,
+        date: today,
+      },
+      { onConflict: "user_id,class_id,date" },
+    );
+    if (error) throw error;
+    return true;
+  } catch (error) {
+    console.error("markAttendance error:", error.message);
+    return false;
+  }
+}
+
+async function getAttendanceStats(userId) {
+  try {
+    const { data } = await supabase
+      .from("attendance")
+      .select("attended")
+      .eq("user_id", userId);
+
+    if (!data || data.length === 0) {
+      return { total: 0, attended: 0, missed: 0, percentage: 0 };
+    }
+
+    const total = data.length;
+    const attended = data.filter((a) => a.attended).length;
+    const missed = total - attended;
+    const percentage = Math.round((attended / total) * 100);
+
+    return { total, attended, missed, percentage };
+  } catch (error) {
+    console.error("getAttendanceStats error:", error.message);
+    return { total: 0, attended: 0, missed: 0, percentage: 0 };
+  }
+}
+
+async function getTaskStats(userId) {
+  try {
+    const { data } = await supabase.from("tasks").select("*").eq("user_id", userId);
+
+    if (!data || data.length === 0) {
+      return { total: 0, completed: 0, pending: 0, completion: 0 };
+    }
+
+    const total = data.length;
+    const completed = data.filter((t) => t.done).length;
+    const pending = total - completed;
+    const completion = Math.round((completed / total) * 100);
+
+    return { total, completed, pending, completion };
+  } catch (error) {
+    console.error("getTaskStats error:", error.message);
+    return { total: 0, completed: 0, pending: 0, completion: 0 };
+  }
+}
+
+async function getUpcomingClasses(userId, hoursAhead = 24) {
+  try {
+    const now = new Date();
+    const future = new Date(now.getTime() + hoursAhead * 60 * 60 * 1000);
+    const today = now.getDate();
+    const tomorrow = future.getDate();
+
+    const currentDay = now.getDay() === 0 ? 6 : now.getDay() - 1; // Convert to 0=Mon
+    const nextDay = currentDay === 6 ? 0 : currentDay + 1;
+
+    let { data: todayClasses } = await supabase
+      .from("schedule")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("day", currentDay);
+
+    let { data: tomorrowClasses } = await supabase
+      .from("schedule")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("day", nextDay);
+
+    todayClasses = todayClasses || [];
+    tomorrowClasses = tomorrowClasses || [];
+
+    // Filter today's classes - only those not yet passed
+    const currentTime = now.getHours() * 100 + now.getMinutes(); // Convert to HHMM format
+    const upcomingToday = todayClasses.filter((c) => {
+      const classTime =
+        parseInt(c.start_time.split(":")[0]) * 100 +
+        parseInt(c.start_time.split(":")[1]);
+      return classTime >= currentTime;
+    });
+
+    return {
+      today: upcomingToday,
+      tomorrow: tomorrowClasses,
+    };
+  } catch (error) {
+    console.error("getUpcomingClasses error:", error.message);
+    return { today: [], tomorrow: [] };
+  }
+}
+
+async function getNextClass(userId) {
+  try {
+    const now = new Date();
+    const currentDay = now.getDay() === 0 ? 6 : now.getDay() - 1;
+    const currentTime = now.getHours() * 100 + now.getMinutes();
+
+    // Get today's schedule
+    const { data: todayClasses } = await supabase
+      .from("schedule")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("day", currentDay)
+      .order("start_time", { ascending: true });
+
+    // Find next class today
+    if (todayClasses && todayClasses.length > 0) {
+      for (const cls of todayClasses) {
+        const classTime =
+          parseInt(cls.start_time.split(":")[0]) * 100 +
+          parseInt(cls.start_time.split(":")[1]);
+        if (classTime >= currentTime) {
+          return { class: cls, when: "today" };
+        }
+      }
+    }
+
+    // If no class today, get first class tomorrow
+    const nextDay = currentDay === 6 ? 0 : currentDay + 1;
+    const { data: tomorrowClasses } = await supabase
+      .from("schedule")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("day", nextDay)
+      .order("start_time", { ascending: true })
+      .limit(1);
+
+    if (tomorrowClasses && tomorrowClasses.length > 0) {
+      return { class: tomorrowClasses[0], when: "tomorrow" };
+    }
+
+    return { class: null, when: null };
+  } catch (error) {
+    console.error("getNextClass error:", error.message);
+    return { class: null, when: null };
+  }
+}
+
 // ========== RESPONSE TEMPLATES ==========
 const responses = {
   en: {
-    greeting: "Hello {name}! 👋 Welcome to your personal assistant!",
-    schedule_empty: "📅 Your schedule is empty. Use buttons to add classes.",
+    greeting: "Hello {name}! 👋 I'm your academic assistant. I'll help you stay organized! 📚",
+    schedule_empty: "📅 Your schedule is empty. Send /add or click ➕ Add Class.",
     schedule_header: "📚 **Your Schedule:**\n",
     schedule_item: "{day} • {start}-{end} — {subject}\n",
-    add_class_help:
-      "📝 Send: /add <subject> <day(0-6)> <HH:MM> <HH:MM>\n\nDays: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun\n\nExample: /add Math 1 10:30 12:05",
-    delete_class_help:
-      "📝 Send: /delete <subject> <day> <HH:MM>\n\nExample: /delete Math 1 10:30",
-    tasks_empty: "📝 No active tasks.",
-    task_item:
-      "📌 **{task}**\n⏰ Due: {due_date}\n🔔 Remind {remind_days} day(s) before",
-    task_added: "✅ Task '{task}' saved!",
-    class_added: "✅ Class '{subject}' added!",
-    class_deleted: "✅ Class '{subject}' deleted!",
-    task_completed: "✅ Task marked as done!",
-    settings_text:
-      "⚙️ **Settings:**\n🔔 Reminder offset: {offset} minutes\nUse buttons to adjust",
-    help_text: `📖 **Available Commands:**
+    today_empty: "📋 No classes today! Enjoy your free time! 🎉",
+    today_header: "📋 **Today's Classes:**\n",
+    tomorrow_empty: "📅 No classes tomorrow. Great!",
+    tomorrow_header: "📅 **Tomorrow's Classes:**\n",
+    next_class: "⏭️ Your next class is {subject} {when} at {time}",
+    next_not_found: "✅ No upcoming classes scheduled!",
+    add_class_help: "📝 Send: /add <subject> <day(0-6)> <HH:MM> <HH:MM>\n\nDays: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun\n\nExample: /add Math 1 10:30 12:05",
+    delete_class_help: "📝 Send: /delete <subject> <day> <HH:MM>\n\nExample: /delete Math 1 10:30",
+    tasks_empty: "📝 All clear! No pending tasks.",
+    task_item: "📌 **{task}**\n⏰ Due: {due_date}\n🔔 Remind {remind_days} day(s) before",
+    task_added: "✅ Task '{task}' saved! I'll remind you.",
+    class_added: "✅ Class '{subject}' added to your schedule!",
+    class_deleted: "✅ Class '{subject}' removed.",
+    task_completed: "✅ Great! Task marked as done!",
+    task_snoozed: "⏸️ Snoozed for 1 hour.",
+    attended: "✅ Attendance marked!",
+    missed: "❌ Marked as missed.",
+    statistics_header: "📊 **Your Statistics:**",
+    attendance_stats: "📅 Attendance: {attended}/{total} classes ({percentage}%)\n❌ Missed: {missed}",
+    task_stats: "✅ Completed: {completed}/{total} tasks ({completion}%)\n⏳ Pending: {pending}",
+    settings_text: "⚙️ **Settings:**\n🔔 Reminder offset: {offset} minutes\n💬 Language: {language}",
+    help_text: `📖 **Commands & Features:**
 
 📅 **Schedule:**
-/add <subject> <day> <start> <end> - Add a class
-/delete <subject> <day> <start> - Delete a class
+/add <subject> <day> <start> <end> - Add class
+/delete <subject> <day> <start> - Delete class
+"What's my schedule today?" - Today's classes
+"What's next?" - Next upcoming class
 
 📝 **Tasks:**
-/deadline <task> <YYYY-MM-DD HH:MM> <days> - Add deadline
-Click ✅ Done to mark as complete
+/deadline <task> <YYYY-MM-DD HH:MM> <days> - Add task
+Click ✅ Done to mark complete
 
-⚙️ **Settings:**
-Use buttons to adjust your preferences
+📊 **Info:**
+"What are my tasks?" - List pending tasks
+"Statistics" - View your progress
 
-Example: /deadline Report 2025-12-20 12:00 2`,
+⚙️ **Other:**
+/upload <link> - Load .ics calendar`,
   },
   ru: {
-    greeting: "Привет {name}! 👋 Добро пожаловать в персональный помощник!",
-    schedule_empty:
-      "📅 Ваше расписание пусто. Используйте кнопки для добавления.",
-    schedule_header: "📚 **Ваше расписание:**\n",
+    greeting: "Привет {name}! 👋 Я твой учебный помощник. Помогу тебе организоваться! 📚",
+    schedule_empty: "📅 Расписание пусто. Отправь /add или нажми ➕ Add Class.",
+    schedule_header: "📚 **Твое расписание:**\n",
     schedule_item: "{day} • {start}-{end} — {subject}\n",
-    add_class_help:
-      "📝 Отправьте: /add <предмет> <день(0-6)> <ЧЧ:ММ> <ЧЧ:ММ>\n\nДни: 0=Пн, 1=Вт, 2=Ср, 3=Чт, 4=Пт, 5=Сб, 6=Вс\n\nПример: /add Математика 1 10:30 12:05",
-    delete_class_help:
-      "📝 Отправьте: /delete <предмет> <день> <ЧЧ:ММ>\n\nПример: /delete Математика 1 10:30",
-    tasks_empty: "📝 Нет активных задач.",
-    task_item:
-      "📌 **{task}**\n⏰ Срок: {due_date}\n🔔 Напомнить за {remind_days} дн.",
-    task_added: "✅ Задача '{task}' сохранена!",
-    class_added: "✅ Занятие '{subject}' добавлено!",
-    class_deleted: "✅ Занятие '{subject}' удалено!",
-    task_completed: "✅ Задача отмечена как выполненная!",
-    settings_text:
-      "⚙️ **Настройки:**\n🔔 Смещение уведомлений: {offset} минут\nИспользуйте кнопки для изменения",
-    help_text: `📖 **Доступные команды:**
+    today_empty: "📋 Сегодня нет пар! Отдыхай! 🎉",
+    today_header: "📋 **Пары сегодня:**\n",
+    tomorrow_empty: "📅 Завтра выходной.",
+    tomorrow_header: "📅 **Пары завтра:**\n",
+    next_class: "⏭️ Следующая пара {subject} {when} в {time}",
+    next_not_found: "✅ Нет предстоящих пар!",
+    add_class_help: "📝 Отправь: /add <предмет> <день(0-6)> <ЧЧ:ММ> <ЧЧ:ММ>\n\nДни: 0=Пн, 1=Вт, 2=Ср, 3=Чт, 4=Пт, 5=Сб, 6=Вс\n\nПример: /add Математика 1 10:30 12:05",
+    delete_class_help: "📝 Отправь: /delete <предмет> <день> <ЧЧ:ММ>\n\nПример: /delete Математика 1 10:30",
+    tasks_empty: "📝 Спокойно! Нет задач.",
+    task_item: "📌 **{task}**\n⏰ Срок: {due_date}\n🔔 Напомню за {remind_days} дн.",
+    task_added: "✅ Задача '{task}' сохранена! Напомню.",
+    class_added: "✅ Предмет '{subject}' добавлен!",
+    class_deleted: "✅ Предмет '{subject}' удален.",
+    task_completed: "✅ Отлично! Задача завершена!",
+    task_snoozed: "⏸️ Отложу на 1 час.",
+    attended: "✅ Посещение отмечено!",
+    missed: "❌ Отмечено как пропуск.",
+    statistics_header: "📊 **Твоя статистика:**",
+    attendance_stats: "📅 Посещаемость: {attended}/{total} пар ({percentage}%)\n❌ Пропусков: {missed}",
+    task_stats: "✅ Выполнено: {completed}/{total} задач ({completion}%)\n⏳ Ожидает: {pending}",
+    settings_text: "⚙️ **Настройки:**\n🔔 Смещение напоминаний: {offset} минут\n💬 Язык: {language}",
+    help_text: `📖 **Команды и возможности:**
 
 📅 **Расписание:**
-/add <предмет> <день> <начало> <конец> - Добавить занятие
-/delete <предмет> <день> <начало> - Удалить занятие
+/add <предмет> <день> <начало> <конец> - Добавить пару
+/delete <предмет> <день> <начало> - Удалить пару
+"Какое расписание сегодня?" - Пары сегодня
+"Что дальше?" - Следующая пара
 
 📝 **Задачи:**
-/deadline <задача> <YYYY-MM-DD ЧЧ:ММ> <дни> - Добавить срок
-Нажмите ✅ Выполнено чтобы отметить как завершенную
+/deadline <задача> <YYYY-MM-DD ЧЧ:ММ> <дни> - Добавить задачу
+Нажми ✅ Выполнено для завершения
 
-⚙️ **Настройки:**
-Используйте кнопки для управления
+📊 **Информация:**
+"Какие у меня задачи?" - Список задач
+"Статистика" - Твой прогресс
 
-Пример: /deadline Отчет 2025-12-20 12:00 2`,
+⚙️ **Другое:**
+/upload <ссылка> - Загрузить .ics календарь`,
   },
 };
 
@@ -361,6 +601,8 @@ async function handleMessage(userId, text, lang) {
     const name = await getUserName(userId);
     const lowText = text.toLowerCase().trim();
     const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const daysRu = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+    const dayNames = lang === "ru" ? daysRu : days;
 
     // Schedule button
     if (text === "📅 Schedule") {
@@ -375,7 +617,7 @@ async function handleMessage(userId, text, lang) {
         let msg = getResponse(lang, "schedule_header");
         for (const { subject, day, start_time, end_time } of schedule) {
           msg += getResponse(lang, "schedule_item", {
-            day: days[day],
+            day: dayNames[day],
             start: start_time,
             end: end_time,
             subject: subject,
@@ -386,8 +628,100 @@ async function handleMessage(userId, text, lang) {
       return;
     }
 
-    // Add class button
-    if (text === "➕ Add class") {
+    // Today's schedule button
+    if (text === "📋 Today") {
+      const upcoming = await getUpcomingClasses(userId, 24);
+      const today = upcoming.today || [];
+      
+      if (today.length === 0) {
+        await sendMessage(
+          userId,
+          getResponse(lang, "today_empty"),
+          getMainKeyboard(),
+        );
+      } else {
+        let msg = getResponse(lang, "today_header");
+        for (const { subject, start_time, end_time } of today) {
+          msg += `${subject} • ${start_time}-${end_time}\n`;
+        }
+        await sendMessage(userId, msg, getMainKeyboard());
+      }
+      return;
+    }
+
+    // What's next button
+    if (text === "⏭️ What's next?" || lowText.includes("what's next") || lowText.includes("что дальше")) {
+      const nextClass = await getNextClass(userId);
+      
+      if (nextClass) {
+        const when = nextClass.when === "today" 
+          ? (lang === "ru" ? "сегодня" : "today")
+          : (lang === "ru" ? "завтра" : "tomorrow");
+        
+        await sendMessage(
+          userId,
+          getResponse(lang, "next_class", {
+            subject: nextClass.class.subject,
+            when,
+            time: nextClass.class.start_time,
+          }),
+          getMainKeyboard(),
+        );
+      } else {
+        await sendMessage(
+          userId,
+          getResponse(lang, "next_not_found"),
+          getMainKeyboard(),
+        );
+      }
+      return;
+    }
+
+    // Statistics button
+    if (text === "📊 Statistics") {
+      const attendance = await getAttendanceStats(userId);
+      const tasks = await getTaskStats(userId);
+      
+      let msg = getResponse(lang, "statistics_header") + "\n\n";
+      msg += getResponse(lang, "attendance_stats", {
+        attended: attendance.attended,
+        total: attendance.total,
+        percentage: attendance.percentage || 0,
+        missed: attendance.missed,
+      });
+      msg += "\n\n";
+      msg += getResponse(lang, "task_stats", {
+        completed: tasks.completed,
+        total: tasks.total,
+        completion: tasks.completion || 0,
+        pending: tasks.pending,
+      });
+      
+      await sendMessage(userId, msg, getMainKeyboard());
+      return;
+    }
+
+    // Add menu button
+    if (text === "➕ Add") {
+      await sendMessage(
+        userId,
+        lang === "ru" ? "Что ты хочешь добавить?" : "What would you like to add?",
+        getAddKeyboard(),
+      );
+      return;
+    }
+
+    // Add class from menu
+    if (text === "📅 Schedule" && lang === "en") {
+      await sendMessage(
+        userId,
+        getResponse(lang, "add_class_help"),
+        getMainKeyboard(),
+      );
+      return;
+    }
+
+    if (text === "📅 Расписание") {
       await sendMessage(
         userId,
         getResponse(lang, "add_class_help"),
@@ -397,7 +731,7 @@ async function handleMessage(userId, text, lang) {
     }
 
     // My tasks button
-    if (text === "📝 My tasks") {
+    if (text === "📝 My tasks" || text === "📝 Мои задачи") {
       const tasks = await getTasks(userId, true);
       if (tasks.length === 0) {
         await sendMessage(
@@ -418,22 +752,12 @@ async function handleMessage(userId, text, lang) {
       return;
     }
 
-    // Add deadline button
-    if (text === "➕ Add deadline") {
-      await sendMessage(
-        userId,
-        "📝 Send: /deadline <task> <YYYY-MM-DD HH:MM> <days>\nExample: /deadline Report 2025-12-20 12:00 2",
-        getMainKeyboard(),
-      );
-      return;
-    }
-
     // Settings button
-    if (text === "⚙️ Settings") {
+    if (text === "⚙️ Settings" || text === "⚙️ Настройки") {
       const offset = await getUserOffset(userId);
       await sendMessage(
         userId,
-        getResponse(lang, "settings_text", { offset }),
+        getResponse(lang, "settings_text", { offset, language: lang === "ru" ? "Русский" : "English" }),
         getSettingsKeyboard(offset),
       );
       return;
@@ -450,13 +774,45 @@ async function handleMessage(userId, text, lang) {
     }
 
     // Help button
-    if (text === "❓ Help") {
+    if (text === "❓ Help" || text === "❓ Помощь") {
       await sendMessage(
         userId,
         getResponse(lang, "help_text"),
         getMainKeyboard(),
       );
       return;
+    }
+
+    // Natural language: "What's my schedule today/tomorrow?"
+    if (lowText.includes("schedule") || lowText.includes("расписание")) {
+      if (lowText.includes("today") || lowText.includes("сегодня")) {
+        text = "📋 Today";
+      } else if (lowText.includes("tomorrow") || lowText.includes("завтра")) {
+        const upcoming = await getUpcomingClasses(userId, 48);
+        const tomorrow = upcoming.tomorrow || [];
+        
+        if (tomorrow.length === 0) {
+          await sendMessage(
+            userId,
+            getResponse(lang, "tomorrow_empty"),
+            getMainKeyboard(),
+          );
+        } else {
+          let msg = getResponse(lang, "tomorrow_header");
+          for (const { subject, start_time, end_time } of tomorrow) {
+            msg += `${subject} • ${start_time}-${end_time}\n`;
+          }
+          await sendMessage(userId, msg, getMainKeyboard());
+        }
+        return;
+      } else {
+        text = "📅 Schedule";
+      }
+    }
+
+    // Natural language: "What are my tasks?"
+    if (lowText.includes("task") || lowText.includes("задач")) {
+      text = "📝 My tasks";
     }
 
     // /add command
@@ -653,6 +1009,112 @@ async function handlePayload(userId, payload, lang) {
             : "❌ Error completing task",
           getMainKeyboard(),
         );
+      }
+    } else if (payload.cmd === "snooze_task") {
+      const taskId = payload.tid;
+      const remindDays = payload.rd || 1; // Default 1 day snooze
+      
+      try {
+        const { error } = await supabase
+          .from("tasks")
+          .update({ remind_days: parseInt(remindDays) + 1 })
+          .eq("id", taskId)
+          .eq("user_id", userId);
+        
+        if (!error) {
+          await sendMessage(
+            userId,
+            getResponse(lang, "task_snoozed"),
+            getMainKeyboard(),
+          );
+        } else {
+          throw error;
+        }
+      } catch (error) {
+        console.error("snooze_task error:", error.message);
+        await sendMessage(
+          userId,
+          lang === "ru" ? "❌ Ошибка отложения" : "❌ Error snoozing",
+          getMainKeyboard(),
+        );
+      }
+    } else if (payload.cmd === "mark_attended") {
+      const classId = payload.cid;
+      const success = await markAttendance(classId, userId, true);
+      
+      if (success) {
+        await sendMessage(
+          userId,
+          getResponse(lang, "attended"),
+          getMainKeyboard(),
+        );
+      } else {
+        await sendMessage(
+          userId,
+          lang === "ru" ? "❌ Ошибка отметки" : "❌ Error marking",
+          getMainKeyboard(),
+        );
+      }
+    } else if (payload.cmd === "mark_missed") {
+      const classId = payload.cid;
+      const success = await markAttendance(classId, userId, false);
+      
+      if (success) {
+        await sendMessage(
+          userId,
+          getResponse(lang, "missed"),
+          getMainKeyboard(),
+        );
+      } else {
+        await sendMessage(
+          userId,
+          lang === "ru" ? "❌ Ошибка отметки" : "❌ Error marking",
+          getMainKeyboard(),
+        );
+      }
+    } else if (payload.cmd === "offset_up") {
+      try {
+        const currentOffset = await getUserOffset(userId);
+        const newOffset = Math.min(currentOffset + 5, 120); // Max 2 hours
+        
+        const { error } = await supabase
+          .from("users")
+          .update({ reminder_offset: newOffset })
+          .eq("user_id", userId);
+        
+        if (!error) {
+          await sendMessage(
+            userId,
+            getResponse(lang, "settings_text", { offset: newOffset, language: lang === "ru" ? "Русский" : "English" }),
+            getSettingsKeyboard(newOffset),
+          );
+        } else {
+          throw error;
+        }
+      } catch (error) {
+        console.error("offset_up error:", error.message);
+      }
+    } else if (payload.cmd === "offset_down") {
+      try {
+        const currentOffset = await getUserOffset(userId);
+        const newOffset = Math.max(currentOffset - 5, 5); // Min 5 minutes
+        
+        const { error } = await supabase
+          .from("users")
+          .update({ reminder_offset: newOffset })
+          .eq("user_id", userId);
+        
+        if (!error) {
+          await sendMessage(
+            userId,
+            getResponse(lang, "settings_text", { offset: newOffset, language: lang === "ru" ? "Русский" : "English" }),
+            getSettingsKeyboard(newOffset),
+          );
+        } else {
+          throw error;
+        }
+      } catch (error) {
+        console.error("offset_down error:", error.message);
       }
     }
   } catch (error) {
