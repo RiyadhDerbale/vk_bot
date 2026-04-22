@@ -297,7 +297,7 @@ async function deleteSchedule(userId, subject, day, startTime) {
 
 async function getTasks(userId, onlyPending = true) {
   try {
-    let query = supabase.from("tasks").select("*").eq("user_id", userId);
+    let query = supabase.from("tasks").select("id, task, due_date, remind_days, done").eq("user_id", userId);
 
     if (onlyPending) {
       query = query.eq("done", false);
@@ -390,7 +390,7 @@ async function getTaskStats(userId) {
   try {
     const { data } = await supabase
       .from("tasks")
-      .select("*")
+      .select("done")
       .eq("user_id", userId);
 
     if (!data || data.length === 0) {
@@ -419,20 +419,22 @@ async function getUpcomingClasses(userId, hoursAhead = 24) {
     const currentDay = now.getDay() === 0 ? 6 : now.getDay() - 1; // Convert to 0=Mon
     const nextDay = currentDay === 6 ? 0 : currentDay + 1;
 
-    let { data: todayClasses } = await supabase
-      .from("schedule")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("day", currentDay);
+    // Run both queries in parallel
+    const [todayResponse, tomorrowResponse] = await Promise.all([
+      supabase
+        .from("schedule")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("day", currentDay),
+      supabase
+        .from("schedule")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("day", nextDay),
+    ]);
 
-    let { data: tomorrowClasses } = await supabase
-      .from("schedule")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("day", nextDay);
-
-    todayClasses = todayClasses || [];
-    tomorrowClasses = tomorrowClasses || [];
+    let todayClasses = todayResponse.data || [];
+    let tomorrowClasses = tomorrowResponse.data || [];
 
     // Filter today's classes - only those not yet passed
     const currentTime = now.getHours() * 100 + now.getMinutes(); // Convert to HHMM format
@@ -457,15 +459,28 @@ async function getNextClass(userId) {
   try {
     const now = new Date();
     const currentDay = now.getDay() === 0 ? 6 : now.getDay() - 1;
+    const nextDay = currentDay === 6 ? 0 : currentDay + 1;
     const currentTime = now.getHours() * 100 + now.getMinutes();
 
-    // Get today's schedule
-    const { data: todayClasses } = await supabase
-      .from("schedule")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("day", currentDay)
-      .order("start_time", { ascending: true });
+    // Run both queries in parallel
+    const [todayResponse, tomorrowResponse] = await Promise.all([
+      supabase
+        .from("schedule")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("day", currentDay)
+        .order("start_time", { ascending: true }),
+      supabase
+        .from("schedule")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("day", nextDay)
+        .order("start_time", { ascending: true })
+        .limit(1),
+    ]);
+
+    const todayClasses = todayResponse.data || [];
+    const tomorrowClasses = tomorrowResponse.data || [];
 
     // Find next class today
     if (todayClasses && todayClasses.length > 0) {
@@ -479,16 +494,7 @@ async function getNextClass(userId) {
       }
     }
 
-    // If no class today, get first class tomorrow
-    const nextDay = currentDay === 6 ? 0 : currentDay + 1;
-    const { data: tomorrowClasses } = await supabase
-      .from("schedule")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("day", nextDay)
-      .order("start_time", { ascending: true })
-      .limit(1);
-
+    // If no class today, use first class tomorrow
     if (tomorrowClasses && tomorrowClasses.length > 0) {
       return { class: tomorrowClasses[0], when: "tomorrow" };
     }
@@ -713,8 +719,10 @@ async function handleMessage(userId, text, lang) {
 
     // Statistics button
     if (text === "📊 Statistics") {
-      const attendance = await getAttendanceStats(userId);
-      const tasks = await getTaskStats(userId);
+      const [attendance, tasks] = await Promise.all([
+        getAttendanceStats(userId),
+        getTaskStats(userId),
+      ]);
 
       let msg = getResponse(lang, "statistics_header") + "\n\n";
       msg += getResponse(lang, "attendance_stats", {
@@ -1192,7 +1200,11 @@ export async function handler(event) {
 
       // Detect language based on text content
       const lang = text.match(/[а-яА-ЯёЁ]/) ? "ru" : "en";
-      await setUserLanguage(userId, lang);
+      
+      // Don't wait for language save, run async
+      setUserLanguage(userId, lang).catch(err => 
+        console.error("setUserLanguage error:", err.message)
+      );
 
       // Handle payload from inline buttons
       if (payload) {
