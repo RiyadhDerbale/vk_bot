@@ -1281,41 +1281,20 @@ export async function handler(event) {
       // Detect language based on text content
       const lang = text.match(/[а-яА-ЯёЁ]/) ? "ru" : "en";
 
-      // Process message in background but don't wait
-      // Fire and forget with error handling
-      (async () => {
-        try {
-          console.log(`[${userId}] Processing message...`);
-          
-          // Save language
-          await setUserLanguage(userId, lang);
+      // Save language first
+      await setUserLanguage(userId, lang);
 
-          // Handle payload from inline buttons
-          if (payload) {
-            console.log(`[${userId}] Handling payload: ${payload.cmd}`);
-            await handlePayload(userId, payload, lang);
-          } else {
-            // Handle regular text messages
-            console.log(`[${userId}] Handling message: ${text.substring(0, 50)}`);
-            await handleMessage(userId, text, lang);
-          }
-          
-          console.log(`[${userId}] Processing complete`);
-        } catch (err) {
-          console.error(`[${userId}] Processing error:`, err.message);
-          try {
-            await sendMessage(
-              userId,
-              "❌ An error occurred. Please try again.",
-              getMainKeyboard(),
-            );
-          } catch (sendErr) {
-            console.error(`[${userId}] Failed to send error message:`, sendErr.message);
-          }
-        }
-      })();
+      // Handle payload from inline buttons
+      if (payload) {
+        console.log(`[${userId}] Handling payload: ${payload.cmd}`);
+        await handlePayload(userId, payload, lang);
+      } else {
+        // Handle regular text messages
+        console.log(`[${userId}] Handling message: ${text.substring(0, 50)}`);
+        await handleMessage(userId, text, lang);
+      }
 
-      // Return immediately to VK
+      // Return immediately to VK after processing
       return {
         statusCode: 200,
         body: JSON.stringify({ ok: true }),
