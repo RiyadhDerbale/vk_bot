@@ -107,10 +107,7 @@ CREATE POLICY "Allow service role" ON attendance
 CREATE POLICY "Allow service role" ON study_logs
   FOR ALL USING (true)
   WITH CHECK (true);
-
-
-
-
+  
   -- Users table - stores user preferences and memory
 CREATE TABLE IF NOT EXISTS users (
   vk_id BIGINT PRIMARY KEY,
