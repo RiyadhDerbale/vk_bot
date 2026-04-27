@@ -111,16 +111,16 @@ CREATE POLICY "Allow service role" ON study_logs
 
 
 
-  -- Users table
+  -- Users table - stores user preferences and memory
 CREATE TABLE IF NOT EXISTS users (
   vk_id BIGINT PRIMARY KEY,
   name TEXT,
   language TEXT DEFAULT 'en',
   reminder_offset INTEGER DEFAULT 60,
-  join_date TIMESTAMP DEFAULT NOW()
+  created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Schedule table
+-- Schedule table - stores all classes
 CREATE TABLE IF NOT EXISTS schedule (
   id SERIAL PRIMARY KEY,
   user_id BIGINT,
@@ -128,10 +128,11 @@ CREATE TABLE IF NOT EXISTS schedule (
   day INTEGER,
   start_time TEXT,
   end_time TEXT,
-  location TEXT DEFAULT ''
+  location TEXT DEFAULT '',
+  created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Tasks table
+-- Tasks table - complete task tracking
 CREATE TABLE IF NOT EXISTS tasks (
   id SERIAL PRIMARY KEY,
   user_id BIGINT,
@@ -141,22 +142,21 @@ CREATE TABLE IF NOT EXISTS tasks (
   priority TEXT DEFAULT 'normal',
   done INTEGER DEFAULT 0,
   completed_date TIMESTAMP,
-  created_date TIMESTAMP DEFAULT NOW()
+  created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Attendance table
-CREATE TABLE IF NOT EXISTS class_attendance (
+-- Attendance table - tracks class attendance
+CREATE TABLE IF NOT EXISTS attendance (
   id SERIAL PRIMARY KEY,
   user_id BIGINT,
   class_name TEXT,
   date DATE,
-  attended INTEGER DEFAULT 0,
-  missed INTEGER DEFAULT 0,
+  attended INTEGER DEFAULT 1,
   UNIQUE(user_id, class_name, date)
 );
 
--- Study sessions
-CREATE TABLE IF NOT EXISTS study_sessions (
+-- Study sessions table
+CREATE TABLE IF NOT EXISTS study (
   id SERIAL PRIMARY KEY,
   user_id BIGINT,
   subject TEXT,
@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS study_sessions (
   date DATE
 );
 
--- Daily statistics
+-- Daily statistics - aggregated stats
 CREATE TABLE IF NOT EXISTS daily_stats (
   id SERIAL PRIMARY KEY,
   user_id BIGINT,
@@ -175,10 +175,8 @@ CREATE TABLE IF NOT EXISTS daily_stats (
   UNIQUE(user_id, date)
 );
 
--- Reminders log
+-- Reminders log - prevents duplicate reminders
 CREATE TABLE IF NOT EXISTS reminders (
   key TEXT PRIMARY KEY,
-  user_id BIGINT,
-  sent INTEGER DEFAULT 1,
-  reminder_date TIMESTAMP
+  created_at TIMESTAMP DEFAULT NOW()
 );
