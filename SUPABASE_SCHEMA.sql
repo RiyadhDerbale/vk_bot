@@ -109,6 +109,8 @@ CREATE POLICY "Allow service role" ON study_logs
   WITH CHECK (true);
 
 
+
+
   -- Users table
 CREATE TABLE IF NOT EXISTS users (
   vk_id BIGINT PRIMARY KEY,
