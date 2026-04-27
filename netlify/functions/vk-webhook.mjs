@@ -1496,11 +1496,10 @@ export async function handler(event) {
   }
 }*/
 
-
 import { createClient } from "@supabase/supabase-js";
 import fetch from "node-fetch";
 
-// ========== CONFIGURATION ==========
+// ========== OPTIMIZED CONFIGURATION ==========
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -1508,1040 +1507,273 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const VK_TOKEN = process.env.VK_TOKEN;
 const VK_API_VERSION = "5.131";
 
-// ========== OPTIMIZED CACHE SYSTEM (Faster Responses) ==========
-const cache = new Map();
-const userStates = new Map();
-const activeUsers = new Map(); // Track active users for faster responses
-const responseQueue = new Map(); // Queue for batched responses
-
-const CACHE_TTL = 600000; // 10 minutes - longer cache for faster responses
-const BATCH_DELAY = 100; // Batch multiple responses
-
-// Optimized cache functions
-function getCached(key) {
-  const cached = cache.get(key);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data;
+// ========== ULTRA-FAST CACHE (LRU with TTL) ==========
+class FastLRUCache {
+  constructor(maxSize = 500, ttl = 600000) {
+    this.cache = new Map();
+    this.maxSize = maxSize;
+    this.ttl = ttl;
   }
-  cache.delete(key);
-  return null;
+
+  get(key) {
+    const item = this.cache.get(key);
+    if (!item) return null;
+    if (Date.now() - item.timestamp > this.ttl) {
+      this.cache.delete(key);
+      return null;
+    }
+    return item.data;
+  }
+
+  set(key, data) {
+    if (this.cache.size >= this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+    }
+    this.cache.set(key, { data, timestamp: Date.now() });
+  }
+
+  delete(key) { this.cache.delete(key); }
+  clear() { this.cache.clear(); }
 }
 
-function setCached(key, data) {
-  cache.set(key, { data, timestamp: Date.now() });
-}
-
-function clearUserCache(userId) {
-  const keys = [`schedule_${userId}`, `tasks_${userId}`, `tasks_pending_${userId}`, `stats_${userId}`];
-  keys.forEach(key => cache.delete(key));
-}
+const cache = new FastLRUCache(500, 600000);
+const userCache = new FastLRUCache(200, 300000);
+const langCache = new FastLRUCache(100, 3600000);
 
 // ========== FAST LANGUAGE DETECTION ==========
-const languageCache = new Map();
+const LANG_PATTERNS = {
+  zh: /[\u4e00-\u9fff]/,
+  ru: /[а-яА-ЯёЁ]/
+};
 
-function detectLanguage(text) {
+const detectLanguage = (text) => {
   if (!text) return 'en';
-  
-  // Check cache first
-  if (languageCache.has(text.substring(0, 20))) {
-    return languageCache.get(text.substring(0, 20));
-  }
+  const key = text.slice(0, 30);
+  const cached = langCache.get(key);
+  if (cached) return cached;
   
   let lang = 'en';
-  if (/[\u4e00-\u9fff]/.test(text)) lang = 'zh';
-  else if (/[а-яА-ЯёЁ]/.test(text)) lang = 'ru';
+  if (LANG_PATTERNS.zh.test(text)) lang = 'zh';
+  else if (LANG_PATTERNS.ru.test(text)) lang = 'ru';
   
-  languageCache.set(text.substring(0, 20), lang);
+  langCache.set(key, lang);
   return lang;
-}
+};
 
-// ========== COMPLETE MULTILINGUAL RESPONSES ==========
-const RESPONSES = {
+// ========== MINIFIED RESPONSES (Faster parsing) ==========
+const R = {
   en: {
-    welcome_new: "🌟 Hello! I'm your Time Management Assistant. What's your name?",
-    name_saved: "🎉 Nice to meet you {name}! I'll help you manage your time effectively.",
-    welcome_back: "👋 Welcome back {name}! You have {tasks} task(s) pending and {classes} class(es) today.",
-    
-    schedule_today: "📅 **TODAY'S SCHEDULE** - {date}\n\n{classes}💡 Reply with class number to mark attendance",
-    schedule_tomorrow: "📅 **TOMORROW'S SCHEDULE** - {date}\n\n{classes}",
-    no_classes: "🎉 No classes today {name}! You have {tasks} pending task(s). Great time to complete them!",
-    no_classes_tomorrow: "🎉 No classes tomorrow {name}! Plan your study time wisely!",
-    
-    next_class: "⏰ **NEXT CLASS:** {subject}\n🕐 Time: {time}\n📍 Location: {location}\n⏱️ In {minutes} minutes\n🔔 I'll remind you {reminder} min before!",
-    no_next_class: "✅ No more classes today {name}! You have {tasks} task(s) pending.",
-    class_reminder: "🔔 **CLASS STARTING SOON!**\n\n📚 {subject}\n🕐 {time}\n📍 {location}\n⏱️ In {minutes} minutes!\n\n✅ Reply 'attend {subject}' after class!",
-    
-    reminder_set: "✅ Reminder set to {minutes} minutes before each class!",
-    reminder_current: "🔔 Current reminder: {minutes} minutes before class.\nUse /reminder <minutes> (5-120) to change.",
-    
-    tasks_header: "📋 **YOUR TASKS** ({pending} pending | {completed} completed)\n\n{tasks}💬 Reply 'done [task name]' to complete\n📊 Say 'stats' for progress",
-    no_tasks: "✅ EXCELLENT {name}! No pending tasks! 🎉\n\n📊 Say 'stats' to see your achievements!",
-    task_added: "✅ **TASK ADDED**\n\n📝 {task}\n📅 Due: {due_date}\n🔔 Remind {days} day(s) before\n⚡ Priority: {priority}",
-    task_completed: "🎉 **CONGRATULATIONS {name}!** 🎉\n\nCompleted: {task}\n\n📊 Your productivity improved!",
-    task_deleted: "🗑️ Deleted task: {task}",
-    task_not_found: "❌ Task '{task}' not found.\n💡 Say 'my tasks' to see your tasks.",
-    
-    attendance_prompt: "📚 **MARK ATTENDANCE**\n\nToday's classes:\n{classes}\n\nReply with NUMBER or CLASS NAME:",
-    attendance_marked: "✅ Marked '{class_name}' as attended!\n{streak_msg}\n📊 Attendance rate updated!",
-    attendance_streak: "🔥 {name}, {streak} classes in a row! 🔥",
-    already_marked: "ℹ️ You already marked '{class_name}' today! ✅",
-    
-    stats_header: "📊 **TIME MANAGEMENT DASHBOARD** 📊\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
-    task_stats: "📝 **TASKS**\n• ✅ Completed: {completed}\n• ⏳ Pending: {pending}\n• 🎯 Rate: {rate}%\n   [{bar}]",
-    attendance_stats: "📚 **ATTENDANCE**\n• 📖 Total: {total}\n• ✅ Attended: {attended}\n• ❌ Missed: {missed}\n• 📈 Rate: {rate}%\n   [{bar}]",
-    study_stats: "⏱️ **STUDY TIME**\n• 📅 Today: {today} min\n• 📆 Week: {week} min\n• 🏆 Total: {total} min\n• 💪 Daily Avg: {avg} min",
-    time_insight: "💡 **TIME INSIGHT**\n{message}",
-    
-    import_instructions: "📥 **IMPORT SCHEDULE**\n\nSend me:\n1️⃣ ICS file attachment\n2️⃣ ICS calendar link\n3️⃣ /ics [url]\n\nI'll add all classes with reminders!",
-    import_progress: "⏳ Importing calendar... Please wait.",
-    import_success: "🎉 **IMPORTED {count} CLASSES!**\n\n✅ Schedule ready\n🔔 Reminders: {reminder} min before\n📅 Say 'today' to see!",
-    import_fail: "❌ Import failed. Please send a valid ICS file or link.",
-    
-    study_logged: "📖 **STUDY LOGGED**\n\n📚 {subject}: {duration} minutes\n📊 Say 'stats' to see progress!",
-    
-    help_text: "🤖 **TIME MANAGEMENT BOT** 🤖\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📅 **SCHEDULE**\n• 'today' - Today's classes\n• 'tomorrow' - Tomorrow's classes\n• 'next class' - Upcoming class\n• Send .ics file - Import timetable\n\n✅ **ATTENDANCE**\n• 'mark attendance' - Mark classes\n• 'attend [class]' - Quick mark\n\n📝 **TASKS**\n• 'my tasks' - View tasks\n• '/task \"Task\" YYYY-MM-DD HH:MM days priority'\n• 'done [task]' - Complete task\n• 'delete task [name]' - Delete task\n\n⚙️ **REMINDERS**\n• '/reminder 45' - Set reminder time\n\n📊 **STATISTICS**\n• 'stats' - View progress\n\n📖 **STUDY**\n• 'studied 30 min math'\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n💬 Just type naturally! 🌟",
-    
-    invalid: "❌ Invalid command. Try 'help' for commands.",
-    error: "❌ Error. Please try again.",
-    thanks: "😊 You're welcome {name}! Need anything else?",
-    goodbye: "👋 Goodbye {name}! Have a productive day!",
-    
-    joke: "😂 {name}: {joke}",
-    how_r_u: "😊 I'm great {name}! Ready to help you manage your time.",
-    
-    unknown: "🤔 Let me help {name}!\n\nTry: 'today' (schedule), 'my tasks' (tasks), 'stats' (progress), or 'help' (commands)"
+    w: "🌟 Hello! What's your name?",
+    n: "🎉 Nice to meet you {name}!",
+    wb: "👋 Welcome back {name}! {t} tasks, {c} classes",
+    td: "📅 **TODAY** {date}\n{c}",
+    nc: "🎉 No classes! {t} tasks pending",
+    nt: "✅ No pending tasks!",
+    ta: "✅ Added: {task}",
+    tc: "🎉 Completed: {task}",
+    ma: "✅ Marked '{c}' attended!",
+    st: "📊 **Stats**\n📝 Tasks: {c}/{t} ({r}%)\n📚 Attendance: {a}/{tt} ({ar}%)",
+    h: "Commands: today, tasks, stats, help",
+    err: "❌ Try again",
+    qp: "pong!",
+    qt: "✅ OK",
+    qs: "🟢 Online"
   },
-  
   ru: {
-    welcome_new: "🌟 Привет! Я твой помощник по управлению временем. Как тебя зовут?",
-    name_saved: "🎉 Приятно познакомиться {name}! Я помогу тебе управлять временем.",
-    welcome_back: "👋 С возвращением {name}! У тебя {tasks} задач(и) и {classes} пар(ы) сегодня.",
-    
-    schedule_today: "📅 **РАСПИСАНИЕ НА СЕГОДНЯ** - {date}\n\n{classes}💡 Ответь номером чтобы отметить",
-    schedule_tomorrow: "📅 **РАСПИСАНИЕ НА ЗАВТРА** - {date}\n\n{classes}",
-    no_classes: "🎉 Сегодня нет пар {name}! У тебя {tasks} задач.",
-    no_classes_tomorrow: "🎉 Завтра нет пар {name}! Планируй время wisely!",
-    
-    next_class: "⏰ **СЛЕДУЮЩАЯ ПАРА:** {subject}\n🕐 {time}\n📍 {location}\n⏱️ Через {minutes} мин\n🔔 Напомню за {reminder} мин!",
-    no_next_class: "✅ Больше нет пар {name}! У тебя {tasks} задач.",
-    class_reminder: "🔔 **ПАРА СКОРО!**\n\n📚 {subject}\n🕐 {time}\n📍 {location}\n⏱️ Через {minutes} мин!\n\n✅ Ответь 'отметить {subject}' после пары!",
-    
-    reminder_set: "✅ Напоминание за {minutes} минут до пары!",
-    reminder_current: "🔔 Сейчас: за {minutes} минут.\nИспользуй /reminder <минуты> (5-120)",
-    
-    tasks_header: "📋 **ЗАДАЧИ** ({pending} активных | {completed} готово)\n\n{tasks}💬 Ответь 'готово [задача]'",
-    no_tasks: "✅ ОТЛИЧНО {name}! Нет задач! 🎉\n\n📊 Скажи 'статистика'!",
-    task_added: "✅ **ЗАДАЧА ДОБАВЛЕНА**\n\n📝 {task}\n📅 Дедлайн: {due_date}\n🔔 Напомню за {days} дн.\n⚡ Приоритет: {priority}",
-    task_completed: "🎉 **ПОЗДРАВЛЯЮ {name}!** 🎉\n\nВыполнено: {task}\n\n📊 Продуктивность выросла!",
-    task_deleted: "🗑️ Удалена задача: {task}",
-    task_not_found: "❌ Задача '{task}' не найдена.\n💡 Скажи 'мои задачи'",
-    
-    attendance_prompt: "📚 **ОТМЕТИТЬ ПОСЕЩЕНИЕ**\n\nПары сегодня:\n{classes}\n\nОтветь НОМЕРОМ или НАЗВАНИЕМ:",
-    attendance_marked: "✅ Отмечено '{class_name}'!\n{streak_msg}\n📊 Посещаемость обновлена!",
-    attendance_streak: "🔥 {name}, {streak} пар(ы) подряд! 🔥",
-    already_marked: "ℹ️ Ты уже отметил '{class_name}' сегодня! ✅",
-    
-    stats_header: "📊 **УПРАВЛЕНИЕ ВРЕМЕНЕМ** 📊\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
-    task_stats: "📝 **ЗАДАЧИ**\n• ✅ Готово: {completed}\n• ⏳ Ждёт: {pending}\n• 🎯 Процент: {rate}%\n   [{bar}]",
-    attendance_stats: "📚 **ПОСЕЩАЕМОСТЬ**\n• 📖 Всего: {total}\n• ✅ Было: {attended}\n• ❌ Пропущено: {missed}\n• 📈 Процент: {rate}%\n   [{bar}]",
-    study_stats: "⏱️ **ВРЕМЯ УЧЁБЫ**\n• 📅 Сегодня: {today} мин\n• 📆 Неделя: {week} мин\n• 🏆 Всего: {total} мин\n• 💪 В день: {avg} мин",
-    time_insight: "💡 **СОВЕТ**\n{message}",
-    
-    import_instructions: "📥 **ИМПОРТ РАСПИСАНИЯ**\n\nОтправь:\n1️⃣ ICS файл\n2️⃣ Ссылку на ICS\n3️⃣ /ics [ссылка]",
-    import_progress: "⏳ Импортирую... Подожди.",
-    import_success: "🎉 **ИМПОРТИРОВАНО {count} ПАР!**\n\n✅ Расписание готово\n🔔 Напоминания за {reminder} мин",
-    import_fail: "❌ Ошибка импорта. Отправь правильный ICS файл.",
-    
-    study_logged: "📖 **УЧЁБА ЗАПИСАНА**\n\n📚 {subject}: {duration} минут\n📊 Скажи 'статистика'!",
-    
-    help_text: "🤖 **ПОМОЩНИК ПО ВРЕМЕНИ** 🤖\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📅 **РАСПИСАНИЕ**\n• 'сегодня' - Пары сегодня\n• 'завтра' - Пары завтра\n• 'следующая пара' - Следующая\n• Отправь .ics - Импорт\n\n✅ **ПОСЕЩАЕМОСТЬ**\n• 'отметить пару' - Отметить\n\n📝 **ЗАДАЧИ**\n• 'мои задачи' - Список\n• '/task \"Задача\" 2025-12-20 23:59 3 high'\n• 'готово [задача]'\n• 'удалить задачу [название]'\n\n⚙️ **НАПОМИНАНИЯ**\n• '/reminder 45' - Установить\n\n📊 **СТАТИСТИКА**\n• 'статистика' - Прогресс\n\n📖 **УЧЁБА**\n• 'учился 30 мин математика'\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n💬 Говори естественно! 🌟",
-    
-    invalid: "❌ Неверно. Попробуй 'помощь'.",
-    error: "❌ Ошибка. Попробуй ещё.",
-    thanks: "😊 Пожалуйста {name}! Ещё нужно?",
-    goodbye: "👋 До свидания {name}! Продуктивного дня!",
-    
-    joke: "😂 {name}: {joke}",
-    how_r_u: "😊 У меня отлично {name}! Готов помочь.",
-    
-    unknown: "🤔 Давай помогу {name}!\n\nПопробуй: 'сегодня'(расписание), 'мои задачи'(задачи), 'статистика'(прогресс), 'помощь'(команды)"
+    w: "🌟 Привет! Как тебя зовут?",
+    n: "🎉 Приятно познакомиться {name}!",
+    wb: "👋 С возвращением {name}! {t} задач, {c} пар",
+    td: "📅 **СЕГОДНЯ** {date}\n{c}",
+    nc: "🎉 Сегодня нет пар! {t} задач",
+    nt: "✅ Нет задач!",
+    ta: "✅ Добавлено: {task}",
+    tc: "🎉 Выполнено: {task}",
+    ma: "✅ Отмечено '{c}'!",
+    st: "📊 **Статистика**\n📝 Задачи: {c}/{t} ({r}%)\n📚 Посещения: {a}/{tt} ({ar}%)",
+    h: "Команды: сегодня, задачи, статистика, помощь",
+    err: "❌ Ошибка",
+    qp: "понг!",
+    qt: "✅ ОК",
+    qs: "🟢 Онлайн"
   },
-  
   zh: {
-    welcome_new: "🌟 你好！我是时间管理助手。你叫什么名字？",
-    name_saved: "🎉 很高兴认识你{name}！我会帮你管理时间。",
-    welcome_back: "👋 欢迎回来{name}！你有{tasks}个任务待办，今天有{classes}节课。",
-    
-    schedule_today: "📅 **今日课表** - {date}\n\n{classes}💡 回复课程编号标记出勤",
-    schedule_tomorrow: "📅 **明日课表** - {date}\n\n{classes}",
-    no_classes: "🎉 {name}，今天没课！你有{tasks}个任务。",
-    no_classes_tomorrow: "🎉 {name}，明天没课！合理安排学习时间！",
-    
-    next_class: "⏰ **下节课：** {subject}\n🕐 时间：{time}\n📍 地点：{location}\n⏱️ {minutes}分钟后\n🔔 我会提前{reminder}分钟提醒！",
-    no_next_class: "✅ {name}，今天没课了！你有{tasks}个任务待办。",
-    class_reminder: "🔔 **快上课了！**\n\n📚 {subject}\n🕐 {time}\n📍 {location}\n⏱️ {minutes}分钟后！\n\n✅ 课后回复'标记{subject}'记录出勤！",
-    
-    reminder_set: "✅ 提醒已设置！课前{minutes}分钟通知！",
-    reminder_current: "🔔 当前提醒：课前{minutes}分钟。\n使用 /reminder <分钟> (5-120) 更改",
-    
-    tasks_header: "📋 **你的任务** ({pending}个待办 | {completed}个完成)\n\n{tasks}💬 回复'完成 [任务名]'标记完成",
-    no_tasks: "✅ 太棒了{name}！没有待办任务！🎉\n\n📊 说'统计'查看成就！",
-    task_added: "✅ **任务已添加**\n\n📝 {task}\n📅 截止：{due_date}\n🔔 提前{days}天提醒\n⚡ 优先级：{priority}",
-    task_completed: "🎉 **恭喜{name}！** 🎉\n\n完成：{task}\n\n📊 生产力提高了！",
-    task_deleted: "🗑️ 已删除任务：{task}",
-    task_not_found: "❌ 找不到任务'{task}'。\n💡 说'我的任务'查看列表",
-    
-    attendance_prompt: "📚 **标记出勤**\n\n今日课程：\n{classes}\n\n回复数字或课程名称：",
-    attendance_marked: "✅ 已标记'{class_name}'为出勤！\n{streak_msg}\n📊 出勤率已更新！",
-    attendance_streak: "🔥 {name}，连续{streak}节课！🔥",
-    already_marked: "ℹ️ 你今天已经标记过'{class_name}'了！✅",
-    
-    stats_header: "📊 **时间管理仪表板** 📊\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
-    task_stats: "📝 **任务**\n• ✅ 已完成：{completed}\n• ⏳ 待办：{pending}\n• 🎯 完成率：{rate}%\n   [{bar}]",
-    attendance_stats: "📚 **出勤**\n• 📖 总计：{total}\n• ✅ 已出勤：{attended}\n• ❌ 缺勤：{missed}\n• 📈 出勤率：{rate}%\n   [{bar}]",
-    study_stats: "⏱️ **学习时间**\n• 📅 今天：{today}分钟\n• 📆 本周：{week}分钟\n• 🏆 总计：{total}分钟\n• 💪 日均：{avg}分钟",
-    time_insight: "💡 **时间洞察**\n{message}",
-    
-    import_instructions: "📥 **导入课表**\n\n发送给我：\n1️⃣ ICS文件附件\n2️⃣ ICS日历链接\n3️⃣ /ics [链接]\n\n我会添加所有课程和提醒！",
-    import_progress: "⏳ 正在导入...请稍等",
-    import_success: "🎉 **已导入{count}门课程！**\n\n✅ 课表已准备\n🔔 课前{reminder}分钟提醒\n📅 说'今天'查看！",
-    import_fail: "❌ 导入失败。请发送有效的ICS文件或链接。",
-    
-    study_logged: "📖 **学习已记录**\n\n📚 {subject}：{duration}分钟\n📊 说'统计'查看进度！",
-    
-    help_text: "🤖 **时间管理助手** 🤖\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📅 **课表**\n• '今天' - 今日课程\n• '明天' - 明日课程\n• '下节课' - 下节课\n• 发送.ics文件 - 导入课表\n\n✅ **出勤**\n• '标记出勤' - 标记课程\n• '标记 [课程]' - 快速标记\n\n📝 **任务**\n• '我的任务' - 查看任务\n• '/task \"任务\" 2025-12-20 23:59 3 high'\n• '完成 [任务]' - 完成任务\n• '删除任务 [名称]' - 删除任务\n\n⚙️ **提醒**\n• '/reminder 45' - 设置提醒时间\n\n📊 **统计**\n• '统计' - 查看进度\n\n📖 **学习**\n• '学习了30分钟数学'\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n💬 自然说话就行！🌟",
-    
-    invalid: "❌ 无效命令。试试'帮助'。",
-    error: "❌ 出错。请重试。",
-    thanks: "😊 不客气{name}！还需要什么？",
-    goodbye: "👋 再见{name}！度过高效的一天！",
-    
-    joke: "😂 {name}：{joke}",
-    how_r_u: "😊 我很好{name}！准备好帮你管理时间。",
-    
-    unknown: "🤔 {name}，让我帮你！\n\n试试：'今天'(课表), '我的任务'(任务), '统计'(进度), '帮助'(命令)"
+    w: "🌟 你好！请问你的名字？",
+    n: "🎉 很高兴认识你{name}！",
+    wb: "👋 欢迎回来{name}！{t}个任务，{c}节课",
+    td: "📅 **今日课表** {date}\n{c}",
+    nc: "🎉 今天没课！{t}个任务",
+    nt: "✅ 没有待办任务！",
+    ta: "✅ 已添加：{task}",
+    tc: "🎉 已完成：{task}",
+    ma: "✅ 已标记'{c}'出勤！",
+    st: "📊 **统计**\n📝 任务：{c}/{t} ({r}%)\n📚 出勤：{a}/{tt} ({ar}%)",
+    h: "命令：今天，任务，统计，帮助",
+    err: "❌ 错误",
+    qp: "pong！",
+    qt: "✅ 正常",
+    qs: "🟢 在线"
   }
 };
 
+// ========== CACHED KEYBOARDS ==========
+const keyboards = {};
+
+const getKeyboard = (lang) => {
+  if (keyboards[lang]) return keyboards[lang];
+  
+  const buttons = {
+    zh: [[{ action: { type: "text", label: "📅 今天" }, color: "primary" }]],
+    ru: [[{ action: { type: "text", label: "📅 Сегодня" }, color: "primary" }]],
+    en: [[{ action: { type: "text", label: "📅 Today" }, color: "primary" }]]
+  };
+  
+  keyboards[lang] = JSON.stringify({ one_time: false, buttons: buttons[lang] || buttons.en });
+  return keyboards[lang];
+};
+
 // ========== FAST VK API ==========
-async function callVkApi(method, params) {
+const sendMessage = async (userId, text, keyboard = null) => {
   try {
-    const url = new URL(`https://api.vk.com/method/${method}`);
-    url.searchParams.append("access_token", VK_TOKEN);
-    url.searchParams.append("v", VK_API_VERSION);
-    Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
+    const params = new URLSearchParams();
+    params.append("access_token", VK_TOKEN);
+    params.append("v", VK_API_VERSION);
+    params.append("user_id", userId);
+    params.append("message", text.slice(0, 4000));
+    params.append("random_id", Date.now());
+    if (keyboard) params.append("keyboard", keyboard);
     
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(url.toString(), { signal: controller.signal });
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    await fetch(`https://api.vk.com/method/messages.send?${params}`, { signal: controller.signal });
     clearTimeout(timeout);
-    
-    const data = await response.json();
-    if (data.error) return null;
-    return data.response;
-  } catch { return null; }
-}
+  } catch { /* silent fail */ }
+};
 
-// Batched message sending for faster responses
-async function sendMessage(userId, text, keyboard = null) {
-  const params = {
-    user_id: userId,
-    message: text,
-    random_id: Date.now() + Math.random(),
-  };
-  if (keyboard) params.keyboard = keyboard;
-  return callVkApi("messages.send", params);
-}
-
-function getKeyboard(lang) {
-  const buttons = lang === 'zh' ? [
-    [{ action: { type: "text", label: "📅 今天" }, color: "primary" }, { action: { type: "text", label: "📅 明天" }, color: "primary" }],
-    [{ action: { type: "text", label: "⏰ 下节课" }, color: "secondary" }, { action: { type: "text", label: "📝 任务" }, color: "positive" }],
-    [{ action: { type: "text", label: "✅ 出勤" }, color: "positive" }, { action: { type: "text", label: "📊 统计" }, color: "secondary" }],
-    [{ action: { type: "text", label: "📥 导入" }, color: "primary" }, { action: { type: "text", label: "❓ 帮助" }, color: "secondary" }]
-  ] : lang === 'ru' ? [
-    [{ action: { type: "text", label: "📅 Сегодня" }, color: "primary" }, { action: { type: "text", label: "📅 Завтра" }, color: "primary" }],
-    [{ action: { type: "text", label: "⏰ Следующая" }, color: "secondary" }, { action: { type: "text", label: "📝 Задачи" }, color: "positive" }],
-    [{ action: { type: "text", label: "✅ Отметить" }, color: "positive" }, { action: { type: "text", label: "📊 Статистика" }, color: "secondary" }],
-    [{ action: { type: "text", label: "📥 Импорт" }, color: "primary" }, { action: { type: "text", label: "❓ Помощь" }, color: "secondary" }]
-  ] : [
-    [{ action: { type: "text", label: "📅 Today" }, color: "primary" }, { action: { type: "text", label: "📅 Tomorrow" }, color: "primary" }],
-    [{ action: { type: "text", label: "⏰ Next" }, color: "secondary" }, { action: { type: "text", label: "📝 Tasks" }, color: "positive" }],
-    [{ action: { type: "text", label: "✅ Mark" }, color: "positive" }, { action: { type: "text", label: "📊 Stats" }, color: "secondary" }],
-    [{ action: { type: "text", label: "📥 Import" }, color: "primary" }, { action: { type: "text", label: "❓ Help" }, color: "secondary" }]
-  ];
-  return JSON.stringify({ one_time: false, buttons });
-}
-
-function getResponse(lang, key, vars = {}) {
-  let text = RESPONSES[lang]?.[key] || RESPONSES.en[key] || key;
-  Object.entries(vars).forEach(([k, v]) => text = text.replace(new RegExp(`{${k}}`, 'g'), v));
-  return text;
-}
-
-// ========== DATABASE WITH MEMORY ==========
-async function getUser(userId) {
-  const cached = getCached(`user_${userId}`);
+// ========== OPTIMIZED DB FUNCTIONS ==========
+const getUser = async (userId) => {
+  const cached = userCache.get(userId);
   if (cached) return cached;
   
   try {
-    const { data } = await supabase.from("users").select("*").eq("vk_id", userId).single();
-    if (data) setCached(`user_${userId}`, data);
+    const { data } = await supabase
+      .from("users")
+      .select("name, language, reminder_offset")
+      .eq("vk_id", userId)
+      .single();
+    if (data) userCache.set(userId, data);
     return data;
   } catch { return null; }
-}
+};
 
-async function saveUser(userId, data) {
+const saveUser = async (userId, data) => {
   try {
     await supabase.from("users").upsert({ vk_id: userId, ...data }, { onConflict: "vk_id" });
-    setCached(`user_${userId}`, { vk_id: userId, ...data });
+    const updated = { ...(await getUser(userId)), ...data };
+    userCache.set(userId, updated);
     return true;
   } catch { return false; }
-}
+};
 
-async function getReminder(userId) {
-  const user = await getUser(userId);
-  return user?.reminder_offset || 60;
-}
-
-async function setReminder(userId, minutes) {
-  return saveUser(userId, { reminder_offset: Math.min(120, Math.max(5, minutes)) });
-}
-
-// ========== SCHEDULE WITH MEMORY ==========
-async function addClass(userId, subject, day, start, end, loc = '') {
-  try {
-    await supabase.from("schedule").insert({ 
-      user_id: userId, subject, day, start_time: start, end_time: end, location: loc 
-    });
-    clearUserCache(userId);
-    return true;
-  } catch { return false; }
-}
-
-async function getSchedule(userId) {
-  const cached = getCached(`schedule_${userId}`);
+const getTodayClasses = async (userId) => {
+  const cacheKey = `sc_${userId}_${new Date().toDateString()}`;
+  const cached = cache.get(cacheKey);
   if (cached) return cached;
   
   try {
     const { data } = await supabase
       .from("schedule")
-      .select("*")
+      .select("subject, start_time, end_time, location")
       .eq("user_id", userId)
-      .order("day", { ascending: true })
-      .order("start_time", { ascending: true });
+      .eq("day", (new Date().getDay() + 6) % 7)
+      .order("start_time");
     const result = data || [];
-    setCached(`schedule_${userId}`, result);
+    cache.set(cacheKey, result);
     return result;
   } catch { return []; }
-}
+};
 
-async function getTodayClasses(userId) {
-  const day = (new Date().getDay() + 6) % 7;
-  const sched = await getSchedule(userId);
-  return sched.filter(c => c.day === day);
-}
-
-async function getTomorrowClasses(userId) {
-  const day = (new Date().getDay() + 7) % 7;
-  const sched = await getSchedule(userId);
-  return sched.filter(c => c.day === day);
-}
-
-async function getNextClass(userId) {
-  const now = new Date();
-  const currentDay = (now.getDay() + 6) % 7;
-  const currentMin = now.getHours() * 60 + now.getMinutes();
-  const sched = await getSchedule(userId);
-  const sorted = [...sched].sort((a, b) => a.day - b.day || a.start_time.localeCompare(b.start_time));
-  
-  for (const c of sorted) {
-    const [h, m] = c.start_time.split(':').map(Number);
-    const classMin = h * 60 + m;
-    if (c.day > currentDay || (c.day === currentDay && classMin > currentMin)) return c;
-  }
-  return sorted[0] || null;
-}
-
-async function deleteClass(userId, subject, day, startTime) {
-  try {
-    await supabase
-      .from("schedule")
-      .delete()
-      .eq("user_id", userId)
-      .eq("subject", subject)
-      .eq("day", day)
-      .eq("start_time", startTime);
-    clearUserCache(userId);
-    return true;
-  } catch { return false; }
-}
-
-// ========== TASKS WITH FULL MEMORY TRACKING ==========
-async function addTask(userId, task, due, days, priority = 'normal') {
-  try {
-    await supabase.from("tasks").insert({ 
-      user_id: userId, task, due_date: due, remind_days: days, priority, done: 0, created_at: new Date().toISOString()
-    });
-    clearUserCache(userId);
-    return true;
-  } catch { return false; }
-}
-
-async function getTasks(userId, pending = true) {
-  const cacheKey = pending ? `tasks_pending_${userId}` : `tasks_${userId}`;
-  const cached = getCached(cacheKey);
+const getTasks = async (userId) => {
+  const cached = cache.get(`ts_${userId}`);
   if (cached) return cached;
   
   try {
-    let query = supabase.from("tasks").select("*").eq("user_id", userId);
-    if (pending) query = query.eq("done", 0);
-    const { data } = await query.order("due_date", { ascending: true });
-    const result = data || [];
-    setCached(cacheKey, result);
-    return result;
-  } catch { return []; }
-}
-
-async function getAllTasks(userId) {
-  return getTasks(userId, false);
-}
-
-async function completeTask(taskId, userId) {
-  try {
-    await supabase
+    const { data } = await supabase
       .from("tasks")
-      .update({ done: 1, completed_date: new Date().toISOString() })
-      .eq("id", taskId)
-      .eq("user_id", userId);
-    
-    // Update daily stats
-    const today = new Date().toISOString().split('T')[0];
-    const { data: daily } = await supabase
-      .from("daily_stats")
-      .select("id, tasks_completed")
+      .select("id, task, due_date, priority")
       .eq("user_id", userId)
-      .eq("date", today)
-      .single();
-    
-    if (daily) {
-      await supabase
-        .from("daily_stats")
-        .update({ tasks_completed: (daily.tasks_completed || 0) + 1 })
-        .eq("id", daily.id);
-    } else {
-      await supabase.from("daily_stats").insert({
-        user_id: userId, date: today, tasks_completed: 1, classes_attended: 0, study_minutes: 0
-      });
-    }
-    
-    clearUserCache(userId);
-    return true;
-  } catch { return false; }
-}
+      .eq("done", 0)
+      .order("due_date")
+      .limit(20);
+    const result = data || [];
+    cache.set(`ts_${userId}`, result);
+    return result;
+  } catch { return []; }
+};
 
-async function deleteTask(taskId, userId) {
+const addTask = async (userId, task, due, days) => {
   try {
-    await supabase.from("tasks").delete().eq("id", taskId).eq("user_id", userId);
-    clearUserCache(userId);
-    return true;
-  } catch { return false; }
-}
-
-async function findTaskByName(userId, name) {
-  const tasks = await getTasks(userId, true);
-  return tasks.find(t => 
-    t.task.toLowerCase().includes(name.toLowerCase()) || 
-    name.toLowerCase().includes(t.task.toLowerCase())
-  );
-}
-
-async function findExactTask(userId, name) {
-  const tasks = await getTasks(userId, true);
-  return tasks.find(t => t.task.toLowerCase() === name.toLowerCase());
-}
-
-async function getTaskStats(userId) {
-  const cached = getCached(`task_stats_${userId}`);
-  if (cached) return cached;
-  
-  const tasks = await getAllTasks(userId);
-  const pending = tasks.filter(t => !t.done).length;
-  const completed = tasks.filter(t => t.done).length;
-  const rate = tasks.length ? Math.round(completed / tasks.length * 100) : 0;
-  const result = { pending, completed, rate };
-  setCached(`task_stats_${userId}`, result);
-  return result;
-}
-
-// ========== ATTENDANCE WITH MEMORY ==========
-async function markAttended(userId, className) {
-  const today = new Date().toISOString().split('T')[0];
-  
-  try {
-    // Check if already marked
-    const { data: existing } = await supabase
-      .from("attendance")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("class_name", className)
-      .eq("date", today)
-      .single();
-    
-    if (existing) return { success: false, already: true };
-    
-    // Mark attendance
-    await supabase.from("attendance").insert({ 
-      user_id: userId, class_name: className, date: today, attended: 1 
+    await supabase.from("tasks").insert({
+      user_id: userId, task, due_date: due, remind_days: days, done: 0
     });
-    
-    // Calculate streak
-    const { data: streakData } = await supabase
-      .from("attendance")
-      .select("date")
-      .eq("user_id", userId)
-      .eq("attended", 1)
-      .order("date", { ascending: false })
-      .limit(10);
-    
-    let streakCount = 0;
-    let expected = new Date(today);
-    for (const s of streakData || []) {
-      const d = new Date(s.date);
-      const diff = Math.floor((expected - d) / 86400000);
-      if (diff === 1) { streakCount++; expected = d; }
-      else if (diff !== 0) break;
-    }
-    
-    // Update daily stats
-    const { data: daily } = await supabase
-      .from("daily_stats")
-      .select("id, classes_attended")
-      .eq("user_id", userId)
-      .eq("date", today)
-      .single();
-    
-    if (daily) {
-      await supabase
-        .from("daily_stats")
-        .update({ classes_attended: (daily.classes_attended || 0) + 1 })
-        .eq("id", daily.id);
-    } else {
-      await supabase.from("daily_stats").insert({
-        user_id: userId, date: today, classes_attended: 1, tasks_completed: 0, study_minutes: 0
-      });
-    }
-    
-    clearUserCache(userId);
-    return { success: true, already: false, streak: streakCount };
-  } catch { return { success: false, already: false }; }
-}
-
-async function getAttendanceStats(userId) {
-  const cached = getCached(`attendance_stats_${userId}`);
-  if (cached) return cached;
-  
-  try {
-    const { data } = await supabase.from("attendance").select("attended").eq("user_id", userId);
-    if (!data?.length) return { total: 0, attended: 0, missed: 0, rate: 0 };
-    
-    const total = data.length;
-    const attended = data.filter(a => a.attended).length;
-    const missed = total - attended;
-    const rate = Math.round(attended / total * 100);
-    const result = { total, attended, missed, rate };
-    setCached(`attendance_stats_${userId}`, result);
-    return result;
-  } catch { return { total: 0, attended: 0, missed: 0, rate: 0 }; }
-}
-
-// ========== STUDY TRACKING ==========
-async function addStudy(userId, subject, duration) {
-  const today = new Date().toISOString().split('T')[0];
-  try {
-    await supabase.from("study").insert({ user_id: userId, subject, duration, date: today });
-    
-    const { data: daily } = await supabase
-      .from("daily_stats")
-      .select("id, study_minutes")
-      .eq("user_id", userId)
-      .eq("date", today)
-      .single();
-    
-    if (daily) {
-      await supabase
-        .from("daily_stats")
-        .update({ study_minutes: (daily.study_minutes || 0) + duration })
-        .eq("id", daily.id);
-    } else {
-      await supabase.from("daily_stats").insert({
-        user_id: userId, date: today, study_minutes: duration, tasks_completed: 0, classes_attended: 0
-      });
-    }
-    
-    clearUserCache(userId);
+    cache.delete(`ts_${userId}`);
     return true;
   } catch { return false; }
-}
+};
 
-async function getStudyStats(userId) {
-  const cached = getCached(`study_stats_${userId}`);
+const completeTask = async (taskId, userId) => {
+  try {
+    await supabase.from("tasks").update({ done: 1, completed_date: new Date().toISOString() }).eq("id", taskId);
+    cache.delete(`ts_${userId}`);
+    return true;
+  } catch { return false; }
+};
+
+const findTask = async (userId, name) => {
+  const tasks = await getTasks(userId);
+  return tasks.find(t => t.task.toLowerCase().includes(name.toLowerCase()));
+};
+
+const markAttended = async (userId, className) => {
+  const today = new Date().toISOString().split('T')[0];
+  try {
+    await supabase.from("attendance").insert({ user_id: userId, class_name: className, date: today, attended: 1 });
+    return true;
+  } catch { return false; }
+};
+
+const getStats = async (userId) => {
+  const cached = cache.get(`st_${userId}`);
   if (cached) return cached;
   
-  const today = new Date().toISOString().split('T')[0];
-  const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
-  const weekAgoStr = weekAgo.toISOString().split('T')[0];
+  const [tasks, attendance] = await Promise.all([
+    supabase.from("tasks").select("done").eq("user_id", userId),
+    supabase.from("attendance").select("attended").eq("user_id", userId)
+  ]);
   
-  try {
-    const { data } = await supabase.from("study").select("duration, date").eq("user_id", userId);
-    if (!data?.length) return { total: 0, weekly: 0, today: 0, avg: 0 };
-    
-    const total = data.reduce((s, d) => s + (d.duration || 0), 0);
-    const weekly = data.filter(d => d.date >= weekAgoStr).reduce((s, d) => s + (d.duration || 0), 0);
-    const todayStudy = data.filter(d => d.date === today).reduce((s, d) => s + (d.duration || 0), 0);
-    const avg = weekly ? Math.round(weekly / 7) : 0;
-    const result = { total, weekly, today: todayStudy, avg };
-    setCached(`study_stats_${userId}`, result);
-    return result;
-  } catch { return { total: 0, weekly: 0, today: 0, avg: 0 }; }
-}
+  const taskData = tasks.data || [];
+  const attData = attendance.data || [];
+  
+  const completed = taskData.filter(t => t.done).length;
+  const total = taskData.length;
+  const attended = attData.filter(a => a.attended).length;
+  const totalAtt = attData.length;
+  
+  const result = {
+    tasks: { completed, pending: total - completed, rate: total ? Math.round(completed/total*100) : 0 },
+    attendance: { attended, total: totalAtt, rate: totalAtt ? Math.round(attended/totalAtt*100) : 0 }
+  };
+  cache.set(`st_${userId}`, result);
+  return result;
+};
 
-// ========== ICS IMPORT ==========
-async function importICS(userId, url) {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-    const resp = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (!resp.ok) return -1;
-    
-    const content = await resp.text();
-    const lines = content.split(/\r?\n/);
-    let count = 0;
-    let current = null;
-    
-    for (const line of lines) {
-      const l = line.trim();
-      if (l === 'BEGIN:VEVENT') current = {};
-      else if (l === 'END:VEVENT' && current) {
-        if (current.summary) {
-          let start = '09:00', end = '10:00', day = 0;
-          if (current.dtstart) {
-            const match = current.dtstart.match(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/);
-            if (match) {
-              const date = new Date(parseInt(match[1]), parseInt(match[2])-1, parseInt(match[3]), parseInt(match[4]), parseInt(match[5]));
-              day = (date.getDay() + 6) % 7;
-              start = `${match[4]}:${match[5]}`;
-            }
-          }
-          if (current.dtend) {
-            const match = current.dtend.match(/T(\d{2})(\d{2})/);
-            if (match) end = `${match[1]}:${match[2]}`;
-          }
-          if (await addClass(userId, current.summary, day, start, end, current.location || '')) count++;
-        }
-        current = null;
-      } else if (current) {
-        if (l.startsWith('SUMMARY:')) current.summary = l.substring(8).replace(/\\,/g, ',').trim();
-        else if (l.startsWith('DTSTART')) current.dtstart = l;
-        else if (l.startsWith('DTEND')) current.dtend = l;
-        else if (l.startsWith('LOCATION:')) current.location = l.substring(9).replace(/\\,/g, ',').trim();
-      }
-    }
-    clearUserCache(userId);
-    return count;
-  } catch { return -1; }
-}
-
-// ========== FAST REMINDER SYSTEM ==========
-let reminderInterval = null;
-
-async function checkReminders() {
-  try {
-    const now = new Date();
-    const currentDay = (now.getDay() + 6) % 7;
-    const currentMin = now.getHours() * 60 + now.getMinutes();
-    
-    const { data: users } = await supabase.from("users").select("vk_id, name, language, reminder_offset");
-    if (!users) return;
-    
-    for (const user of users) {
-      const sched = await getSchedule(user.vk_id);
-      const offset = user.reminder_offset || 60;
-      const lang = user.language || 'en';
-      
-      for (const cls of sched.filter(c => c.day === currentDay)) {
-        const [h, m] = cls.start_time.split(':').map(Number);
-        const classMin = h * 60 + m;
-        const remindMin = classMin - offset;
-        
-        if (remindMin <= currentMin && currentMin <= remindMin + 2) {
-          const key = `remind_${user.vk_id}_${currentDay}_${cls.start_time}_${now.toDateString()}`;
-          const { data: existing } = await supabase.from("reminders").select("key").eq("key", key).single();
-          
-          if (!existing) {
-            const msg = getResponse(lang, 'class_reminder', {
-              subject: cls.subject, time: cls.start_time, location: cls.location || 'Classroom',
-              minutes: classMin - currentMin
-            });
-            await sendMessage(user.vk_id, msg, getKeyboard(lang));
-            await supabase.from("reminders").insert({ key });
-          }
-        }
-      }
-    }
-  } catch(e) { console.error("Reminder error:", e); }
-}
-
-function startReminders() {
-  if (reminderInterval) clearInterval(reminderInterval);
-  reminderInterval = setInterval(checkReminders, 60000);
-}
-
-// ========== MAIN MESSAGE HANDLER (OPTIMIZED) ==========
-async function handleMessage(userId, text, lang) {
-  try {
-    const user = await getUser(userId);
-    const name = user?.name || null;
-    const displayName = name || 'friend';
-    const lowerText = text.toLowerCase().trim();
-    
-    // NEW USER - Get name
-    if (!name && !lowerText.match(/(my name is|call me|меня зовут|叫我|我是|名字)/)) {
-      await sendMessage(userId, getResponse(lang, 'welcome_new'), getKeyboard(lang));
-      return;
-    }
-    
-    // Extract name
-    const nameMatch = text.match(/(?:my name is|call me|меня зовут|叫我|我是|名字)\s+([A-Za-zА-Яа-яёЁ\u4e00-\u9fff]+)/i);
-    if (nameMatch && !name) {
-      const newName = nameMatch[1].charAt(0).toUpperCase() + nameMatch[1].slice(1).toLowerCase();
-      await saveUser(userId, { name: newName });
-      
-      const tasks = await getTasks(userId, true);
-      const classes = await getTodayClasses(userId);
-      await sendMessage(userId, getResponse(lang, 'name_saved', { name: newName }), getKeyboard(lang));
-      
-      if (tasks.length || classes.length) {
-        await sendMessage(userId, getResponse(lang, 'welcome_back', { 
-          name: newName, tasks: tasks.length, classes: classes.length 
-        }), getKeyboard(lang));
-      }
-      return;
-    }
-    
-    // Welcome back check
-    if (name && (lowerText === 'hello' || lowerText === 'hi' || lowerText === 'hey' || lowerText === 'привет' || lowerText === '你好')) {
-      const tasks = await getTasks(userId, true);
-      const classes = await getTodayClasses(userId);
-      await sendMessage(userId, getResponse(lang, 'welcome_back', { 
-        name: displayName, tasks: tasks.length, classes: classes.length 
-      }), getKeyboard(lang));
-      return;
-    }
-    
-    // ===== SCHEDULE =====
-    if (text === "📅 Today" || text === "📅 Сегодня" || text === "📅 今天" || lowerText === 'today' || lowerText === 'сегодня' || lowerText === '今天') {
-      const classes = await getTodayClasses(userId);
-      const tasks = await getTasks(userId, true);
-      
-      if (!classes.length) {
-        await sendMessage(userId, getResponse(lang, 'no_classes', { name: displayName, tasks: tasks.length }), getKeyboard(lang));
-      } else {
-        const dayNames = lang === 'zh' ? ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] : 
-                         lang === 'ru' ? ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'] : 
-                         ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-        let list = '';
-        for (let i = 0; i < classes.length; i++) {
-          list += `${i+1}. **${classes[i].subject}** • ${classes[i].start_time}-${classes[i].end_time}\n`;
-          if (classes[i].location) list += `   📍 ${classes[i].location}\n`;
-          list += '\n';
-        }
-        const date = new Date().toLocaleDateString(lang === 'zh' ? 'zh-CN' : lang === 'ru' ? 'ru-RU' : 'en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-        await sendMessage(userId, getResponse(lang, 'schedule_today', { date, classes: list }), getKeyboard(lang));
-      }
-      return;
-    }
-    
-    if (text === "📅 Tomorrow" || text === "📅 Завтра" || text === "📅 明天" || lowerText === 'tomorrow' || lowerText === 'завтра' || lowerText === '明天') {
-      const classes = await getTomorrowClasses(userId);
-      
-      if (!classes.length) {
-        await sendMessage(userId, getResponse(lang, 'no_classes_tomorrow', { name: displayName }), getKeyboard(lang));
-      } else {
-        let list = '';
-        for (let i = 0; i < classes.length; i++) {
-          list += `${i+1}. **${classes[i].subject}** • ${classes[i].start_time}-${classes[i].end_time}\n`;
-          if (classes[i].location) list += `   📍 ${classes[i].location}\n`;
-          list += '\n';
-        }
-        const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
-        const date = tomorrow.toLocaleDateString(lang === 'zh' ? 'zh-CN' : lang === 'ru' ? 'ru-RU' : 'en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-        await sendMessage(userId, getResponse(lang, 'schedule_tomorrow', { date, classes: list }), getKeyboard(lang));
-      }
-      return;
-    }
-    
-    // ===== NEXT CLASS =====
-    if (text === "⏰ Next" || text === "⏰ Следующая" || text === "⏰ 下节课" || lowerText === 'next class' || lowerText === 'what\'s next' || lowerText === 'следующая пара' || lowerText === '下节课') {
-      const next = await getNextClass(userId);
-      const reminder = await getReminder(userId);
-      
-      if (next) {
-        const now = new Date();
-        const [h, m] = next.start_time.split(':').map(Number);
-        let mins = (h * 60 + m) - (now.getHours() * 60 + now.getMinutes());
-        mins = Math.max(0, mins);
-        await sendMessage(userId, getResponse(lang, 'next_class', {
-          subject: next.subject, time: next.start_time, location: next.location || 'Classroom',
-          minutes: mins, reminder
-        }), getKeyboard(lang));
-      } else {
-        const tasks = await getTasks(userId, true);
-        await sendMessage(userId, getResponse(lang, 'no_next_class', { name: displayName, tasks: tasks.length }), getKeyboard(lang));
-      }
-      return;
-    }
-    
-    // ===== REMINDER SETTINGS =====
-    if (text.startsWith('/reminder')) {
-      const parts = text.split(/\s+/);
-      if (parts.length > 1) {
-        const mins = parseInt(parts[1]);
-        if (!isNaN(mins) && mins >= 5 && mins <= 120) {
-          await setReminder(userId, mins);
-          await sendMessage(userId, getResponse(lang, 'reminder_set', { minutes: mins }), getKeyboard(lang));
-        } else {
-          const current = await getReminder(userId);
-          await sendMessage(userId, getResponse(lang, 'reminder_current', { minutes: current }), getKeyboard(lang));
-        }
-      } else {
-        const current = await getReminder(userId);
-        await sendMessage(userId, getResponse(lang, 'reminder_current', { minutes: current }), getKeyboard(lang));
-      }
-      return;
-    }
-    
-    // ===== MARK ATTENDANCE =====
-    if (text === "✅ Mark" || text === "✅ Отметить" || text === "✅ 出勤" || lowerText === 'mark attendance' || lowerText === 'отметить пару' || lowerText === '标记出勤') {
-      const classes = await getTodayClasses(userId);
-      
-      if (!classes.length) {
-        await sendMessage(userId, getResponse(lang, 'no_classes', { name: displayName, tasks: 0 }), getKeyboard(lang));
-      } else {
-        let list = '';
-        for (let i = 0; i < classes.length; i++) list += `${i+1}. ${classes[i].subject}\n`;
-        await sendMessage(userId, getResponse(lang, 'attendance_prompt', { classes: list, count: classes.length }), getKeyboard(lang));
-        userStates.set(userId, { mode: 'attendance', classes });
-        setTimeout(() => { if (userStates.get(userId)?.mode === 'attendance') userStates.delete(userId); }, 120000);
-      }
-      return;
-    }
-    
-    // Handle attendance by number
-    if (/^\d+$/.test(text) && text.length <= 2) {
-      const state = userStates.get(userId);
-      if (state?.mode === 'attendance') {
-        const idx = parseInt(text) - 1;
-        if (idx >= 0 && idx < state.classes.length) {
-          const result = await markAttended(userId, state.classes[idx].subject);
-          if (result.already) {
-            await sendMessage(userId, getResponse(lang, 'already_marked', { class_name: state.classes[idx].subject }), getKeyboard(lang));
-          } else {
-            const streakMsg = result.streak > 0 ? getResponse(lang, 'attendance_streak', { name: displayName, streak: result.streak + 1 }) : '';
-            await sendMessage(userId, getResponse(lang, 'attendance_marked', { class_name: state.classes[idx].subject, streak_msg: streakMsg, name: displayName }), getKeyboard(lang));
-          }
-          userStates.delete(userId);
-          return;
-        }
-      }
-    }
-    
-    // Handle attendance by class name
-    const todayClasses = await getTodayClasses(userId);
-    for (const cls of todayClasses) {
-      if (lowerText.includes(cls.subject.toLowerCase())) {
-        const result = await markAttended(userId, cls.subject);
-        if (result.already) {
-          await sendMessage(userId, getResponse(lang, 'already_marked', { class_name: cls.subject }), getKeyboard(lang));
-        } else {
-          const streakMsg = result.streak > 0 ? getResponse(lang, 'attendance_streak', { name: displayName, streak: result.streak + 1 }) : '';
-          await sendMessage(userId, getResponse(lang, 'attendance_marked', { class_name: cls.subject, streak_msg: streakMsg, name: displayName }), getKeyboard(lang));
-        }
-        return;
-      }
-    }
-    
-    // ===== TASKS =====
-    if (text === "📝 Tasks" || text === "📝 Задачи" || text === "📝 任务" || lowerText === 'my tasks' || lowerText === 'мои задачи' || lowerText === '我的任务') {
-      const tasks = await getTasks(userId, true);
-      const stats = await getTaskStats(userId);
-      
-      if (!tasks.length) {
-        await sendMessage(userId, getResponse(lang, 'no_tasks', { name: displayName }), getKeyboard(lang));
-      } else {
-        let list = '';
-        for (let i = 0; i < Math.min(tasks.length, 15); i++) {
-          const t = tasks[i];
-          const due = new Date(t.due_date);
-          const priorityIcon = t.priority === 'high' ? '🔴' : t.priority === 'medium' ? '🟡' : '🟢';
-          const daysLeft = Math.ceil((due - new Date()) / 86400000);
-          list += `${priorityIcon} ${i+1}. **${t.task}**\n   📅 Due: ${due.toLocaleDateString()} (${daysLeft} days)\n\n`;
-        }
-        await sendMessage(userId, getResponse(lang, 'tasks_header', { pending: stats.pending, completed: stats.completed, tasks: list }), getKeyboard(lang));
-      }
-      return;
-    }
-    
-    // Complete task - "done task name"
-    const doneMatch = text.match(/(?:done|complete|finished|готово|сделано|完成|完成了)\s+(.+?)(?:\.|$)/i);
-    if (doneMatch) {
-      const taskName = doneMatch[1].trim();
-      const task = await findTaskByName(userId, taskName);
-      if (task) {
-        await completeTask(task.id, userId);
-        await sendMessage(userId, getResponse(lang, 'task_completed', { name: displayName, task: task.task }), getKeyboard(lang));
-      } else {
-        await sendMessage(userId, getResponse(lang, 'task_not_found', { task: taskName }), getKeyboard(lang));
-      }
-      return;
-    }
-    
-    // Delete task - "delete task name"
-    const deleteMatch = text.match(/(?:delete|remove|удалить|删除)\s+(?:task\s+)?(.+?)(?:\.|$)/i);
-    if (deleteMatch) {
-      const taskName = deleteMatch[1].trim();
-      const task = await findTaskByName(userId, taskName);
-      if (task) {
-        await deleteTask(task.id, userId);
-        await sendMessage(userId, getResponse(lang, 'task_deleted', { task: task.task }), getKeyboard(lang));
-      } else {
-        await sendMessage(userId, getResponse(lang, 'task_not_found', { task: taskName }), getKeyboard(lang));
-      }
-      return;
-    }
-    
-    // ===== ADD TASK =====
-    if (text.startsWith('/task')) {
-      const match = text.match(/\/task\s+['"](.+?)['"]\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s+(\d+)(?:\s+(\w+))?/);
-      if (match) {
-        await addTask(userId, match[1], match[2], parseInt(match[3]), match[4] || 'normal');
-        await sendMessage(userId, getResponse(lang, 'task_added', {
-          task: match[1], due_date: match[2], days: match[3],
-          priority: match[4] === 'high' ? 'HIGH' : match[4] === 'medium' ? 'MEDIUM' : 'NORMAL'
-        }), getKeyboard(lang));
-      } else {
-        await sendMessage(userId, getResponse(lang, 'invalid'), getKeyboard(lang));
-      }
-      return;
-    }
-    
-    // ===== STATISTICS =====
-    if (text === "📊 Stats" || text === "📊 Статистика" || text === "📊 统计" || lowerText === 'stats' || lowerText === 'statistics' || lowerText === 'статистика' || lowerText === '统计') {
-      const [taskStats, attendanceStats, studyStats] = await Promise.all([
-        getTaskStats(userId), getAttendanceStats(userId), getStudyStats(userId)
-      ]);
-      
-      const taskBar = '█'.repeat(Math.floor(taskStats.rate / 10)) + '░'.repeat(10 - Math.floor(taskStats.rate / 10));
-      const attendBar = '█'.repeat(Math.floor(attendanceStats.rate / 10)) + '░'.repeat(10 - Math.floor(attendanceStats.rate / 10));
-      
-      let msg = getResponse(lang, 'stats_header');
-      msg += getResponse(lang, 'task_stats', { completed: taskStats.completed, pending: taskStats.pending, rate: taskStats.rate, bar: taskBar }) + '\n\n';
-      msg += getResponse(lang, 'attendance_stats', { total: attendanceStats.total, attended: attendanceStats.attended, missed: attendanceStats.missed, rate: attendanceStats.rate, bar: attendBar }) + '\n\n';
-      msg += getResponse(lang, 'study_stats', { today: studyStats.today, week: studyStats.weekly, total: studyStats.total, avg: studyStats.avg });
-      
-      let insight = '';
-      if (taskStats.rate > 80) insight = `Excellent productivity ${displayName}! Keep crushing your goals! 🎯`;
-      else if (attendanceStats.rate < 50 && attendanceStats.total > 5) insight = `Your attendance is ${attendanceStats.rate}%. Try to attend more classes! 📚`;
-      else if (studyStats.total < 300) insight = `You've studied ${Math.round(studyStats.total/60)} hours total. Consistency is key! 💪`;
-      else insight = `Great progress ${displayName}! Every step counts toward your success! 🌟`;
-      
-      msg += '\n\n' + getResponse(lang, 'time_insight', { message: insight });
-      await sendMessage(userId, msg, getKeyboard(lang));
-      return;
-    }
-    
-    // ===== STUDY LOGGING =====
-    const studyMatch = text.match(/(?:study|studied|учился|занимался|学习|学了)\s+(\d+)\s+(?:minutes?|min|минут|分钟)(?:\s+(?:for|по|学习)\s+(.+?))?(?:\.|$)/i);
-    if (studyMatch) {
-      const duration = parseInt(studyMatch[1]);
-      const subject = studyMatch[2]?.trim() || 'General';
-      await addStudy(userId, subject, duration);
-      await sendMessage(userId, getResponse(lang, 'study_logged', { subject, duration }), getKeyboard(lang));
-      return;
-    }
-    
-    // ===== ICS IMPORT =====
-    if (text === "📥 Import" || text === "📥 Импорт" || text === "📥 导入" || lowerText === 'import' || lowerText === 'импорт' || lowerText === '导入') {
-      await sendMessage(userId, getResponse(lang, 'import_instructions'), getKeyboard(lang));
-      return;
-    }
-    
-    if (text.startsWith('/ics')) {
-      const parts = text.split(/\s+/);
-      if (parts.length > 1) {
-        await sendMessage(userId, getResponse(lang, 'import_progress'), getKeyboard(lang));
-        const reminder = await getReminder(userId);
-        const count = await importICS(userId, parts[1]);
-        if (count > 0) {
-          await sendMessage(userId, getResponse(lang, 'import_success', { count, reminder }), getKeyboard(lang));
-        } else {
-          await sendMessage(userId, getResponse(lang, 'import_fail'), getKeyboard(lang));
-        }
-      } else {
-        await sendMessage(userId, getResponse(lang, 'import_instructions'), getKeyboard(lang));
-      }
-      return;
-    }
-    
-    // ===== HELP =====
-    if (text === "❓ Help" || text === "❓ Помощь" || text === "❓ 帮助" || lowerText === 'help' || lowerText === 'помощь' || lowerText === '帮助') {
-      await sendMessage(userId, getResponse(lang, 'help_text'), getKeyboard(lang));
-      return;
-    }
-    
-    // ===== POLITE RESPONSES =====
-    if (lowerText.includes('thanks') || lowerText.includes('thank') || lowerText.includes('спасибо') || lowerText.includes('谢谢')) {
-      await sendMessage(userId, getResponse(lang, 'thanks', { name: displayName }), getKeyboard(lang));
-      return;
-    }
-    
-    if (lowerText.includes('goodbye') || lowerText.includes('bye') || lowerText.includes('пока') || lowerText.includes('再见')) {
-      await sendMessage(userId, getResponse(lang, 'goodbye', { name: displayName }), getKeyboard(lang));
-      return;
-    }
-    
-    if (lowerText.includes('how are you') || lowerText.includes('how are you doing') || lowerText.includes('как дела') || lowerText.includes('你好吗')) {
-      await sendMessage(userId, getResponse(lang, 'how_r_u', { name: displayName }), getKeyboard(lang));
-      return;
-    }
-    
-    if (lowerText.includes('joke') || lowerText.includes('jokes') || lowerText.includes('шутка') || lowerText.includes('笑话')) {
-      const jokes = {
-        en: ["Why don't scientists trust atoms? Because they make up everything!", "What do you call a fake noodle? An impasta!", "Why did the scarecrow win an award? He was outstanding in his field!"],
-        ru: ["Почему программисты путают Хэллоуин с Рождеством? 31 Oct = 25 Dec!", "Что говорит один ноль другому? Без тебя я просто пустое место!", "Почему студенты любят спать на лекциях? Потому что сон - лучшее лекарство от скуки!"],
-        zh: ["为什么科学家不相信原子？因为它们构成了一切！", "为什么数学书总是很悲伤？因为它有太多问题！", "为什么电脑总是很冷？因为它的窗户总是打开着！"]
-      };
-      const jokeList = jokes[lang] || jokes.en;
-      await sendMessage(userId, getResponse(lang, 'joke', { name: displayName, joke: jokeList[Math.floor(Math.random() * jokeList.length)] }), getKeyboard(lang));
-      return;
-    }
-    
-    // ===== DEFAULT =====
-    await sendMessage(userId, getResponse(lang, 'unknown', { name: displayName }), getKeyboard(lang));
-    
-  } catch (error) {
-    console.error("Handle error:", error);
-    await sendMessage(userId, getResponse(lang, 'error', { name: displayName }), getKeyboard(lang));
-  }
-}
-
-// ========== WEBHOOK HANDLER ==========
+// ========== MAIN HANDLER (ULTRA FAST) ==========
 export async function handler(event) {
+  const start = Date.now();
+  
   try {
     const body = JSON.parse(event.body);
     
-    // Fast confirmation response
     if (body.type === "confirmation") {
       return { statusCode: 200, body: process.env.VK_CONFIRMATION_TOKEN || "default" };
     }
@@ -2549,60 +1781,166 @@ export async function handler(event) {
     if (body.type === "message_new") {
       const msg = body.object.message;
       const userId = msg.from_id;
-      const text = msg.text || "";
-      const attachments = msg.attachments || [];
+      const text = msg.text?.trim() || "";
+      const lower = text.toLowerCase();
       
-      console.log(`[${userId}] ${text.substring(0, 50)}`);
-      
-      // Fast language detection
-      const lang = detectLanguage(text);
-      await saveUser(userId, { language: lang });
-      
-      // Handle ICS file attachment (fast)
-      for (const att of attachments) {
-        if (att.type === 'doc' && att.doc.title?.toLowerCase().endsWith('.ics')) {
-          await sendMessage(userId, getResponse(lang, 'import_progress'), getKeyboard(lang));
-          const reminder = await getReminder(userId);
-          const count = await importICS(userId, att.doc.url);
-          if (count > 0) {
-            await sendMessage(userId, getResponse(lang, 'import_success', { count, reminder }), getKeyboard(lang));
-          } else {
-            await sendMessage(userId, getResponse(lang, 'import_fail'), getKeyboard(lang));
-          }
-          return { statusCode: 200, body: JSON.stringify({ ok: true }) };
-        }
+      // Quick command responses (no DB)
+      if (R.en[lower]) {
+        await sendMessage(userId, R.en[lower]);
+        return { statusCode: 200 };
       }
       
-      // Handle ICS link in text
-      const urlMatch = text.match(/(https?:\/\/[^\s]+\.ics)/i);
-      if (urlMatch) {
-        await sendMessage(userId, getResponse(lang, 'import_progress'), getKeyboard(lang));
-        const reminder = await getReminder(userId);
-        const count = await importICS(userId, urlMatch[1]);
-        if (count > 0) {
-          await sendMessage(userId, getResponse(lang, 'import_success', { count, reminder }), getKeyboard(lang));
+      // Get user (cached)
+      let user = await getUser(userId);
+      const lang = user?.language || detectLanguage(text);
+      
+      if (!user?.language && lang !== 'en') {
+        await saveUser(userId, { language: lang });
+        user = { ...user, language: lang };
+      }
+      
+      const name = user?.name;
+      const displayName = name || 'friend';
+      
+      // New user
+      if (!name && !lower.match(/(my name is|меня зовут|叫我)/)) {
+        await sendMessage(userId, R[lang].w, getKeyboard(lang));
+        return { statusCode: 200 };
+      }
+      
+      // Extract name
+      const nameMatch = text.match(/(?:my name is|меня зовут|叫我)\s+([A-Za-zА-Яа-яёЁ\u4e00-\u9fff]+)/i);
+      if (nameMatch && !name) {
+        const newName = nameMatch[1][0].toUpperCase() + nameMatch[1].slice(1).toLowerCase();
+        await saveUser(userId, { name: newName });
+        await sendMessage(userId, R[lang].n.replace('{name}', newName), getKeyboard(lang));
+        
+        const [tasks, classes] = await Promise.all([getTasks(userId), getTodayClasses(userId)]);
+        if (tasks.length || classes.length) {
+          await sendMessage(userId, R[lang].wb.replace('{name}', newName).replace('{t}', tasks.length).replace('{c}', classes.length), getKeyboard(lang));
+        }
+        return { statusCode: 200 };
+      }
+      
+      // ===== FAST COMMANDS =====
+      
+      // Today's schedule
+      if (lower === 'today' || lower === 'сегодня' || lower === '今天' || text === "📅 Today") {
+        const [classes, tasks] = await Promise.all([getTodayClasses(userId), getTasks(userId)]);
+        
+        if (!classes.length) {
+          await sendMessage(userId, R[lang].nc.replace('{t}', tasks.length), getKeyboard(lang));
         } else {
-          await sendMessage(userId, getResponse(lang, 'import_fail'), getKeyboard(lang));
+          let list = '';
+          for (let i = 0; i < Math.min(classes.length, 8); i++) {
+            list += `${i+1}. ${classes[i].subject} • ${classes[i].start_time}\n`;
+          }
+          const date = new Date().toLocaleDateString();
+          await sendMessage(userId, R[lang].td.replace('{date}', date).replace('{c}', list), getKeyboard(lang));
         }
-        return { statusCode: 200, body: JSON.stringify({ ok: true }) };
+        return { statusCode: 200 };
       }
       
-      // Process message
-      await handleMessage(userId, text, lang);
-      return { statusCode: 200, body: JSON.stringify({ ok: true }) };
+      // My tasks
+      if (lower === 'my tasks' || lower === 'мои задачи' || lower === '我的任务' || text === "📝 Tasks") {
+        const tasks = await getTasks(userId);
+        
+        if (!tasks.length) {
+          await sendMessage(userId, R[lang].nt, getKeyboard(lang));
+        } else {
+          let list = '';
+          for (let i = 0; i < Math.min(tasks.length, 10); i++) {
+            list += `${i+1}. ${tasks[i].task}\n`;
+          }
+          await sendMessage(userId, `📋 **Tasks**\n${list}`, getKeyboard(lang));
+        }
+        return { statusCode: 200 };
+      }
+      
+      // Complete task
+      const doneMatch = text.match(/(?:done|готово|完成)\s+(.+)/i);
+      if (doneMatch) {
+        const task = await findTask(userId, doneMatch[1].trim());
+        if (task) {
+          await completeTask(task.id, userId);
+          await sendMessage(userId, R[lang].tc.replace('{task}', task.task), getKeyboard(lang));
+        }
+        return { statusCode: 200 };
+      }
+      
+      // Add task
+      if (text.startsWith('/task')) {
+        const match = text.match(/\/task\s+['"](.+?)['"]\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s+(\d+)/);
+        if (match) {
+          await addTask(userId, match[1], match[2], parseInt(match[3]));
+          await sendMessage(userId, R[lang].ta.replace('{task}', match[1]), getKeyboard(lang));
+        }
+        return { statusCode: 200 };
+      }
+      
+      // Mark attendance
+      if (lower === 'mark attendance' || lower === 'отметить' || lower === '标记' || text === "✅ Mark") {
+        const classes = await getTodayClasses(userId);
+        if (!classes.length) {
+          await sendMessage(userId, R[lang].nc.replace('{t}', 0), getKeyboard(lang));
+        } else {
+          let list = '';
+          for (let i = 0; i < classes.length; i++) list += `${i+1}. ${classes[i].subject}\n`;
+          await sendMessage(userId, `📚 Reply number:\n${list}`, getKeyboard(lang));
+        }
+        return { statusCode: 200 };
+      }
+      
+      // Handle attendance number
+      if (/^\d+$/.test(text) && text.length <= 2) {
+        const classes = await getTodayClasses(userId);
+        const idx = parseInt(text) - 1;
+        if (classes[idx]) {
+          await markAttended(userId, classes[idx].subject);
+          await sendMessage(userId, R[lang].ma.replace('{c}', classes[idx].subject), getKeyboard(lang));
+        }
+        return { statusCode: 200 };
+      }
+      
+      // Statistics
+      if (lower === 'stats' || lower === 'statistics' || lower === 'статистика' || lower === '统计' || text === "📊 Stats") {
+        const stats = await getStats(userId);
+        const msg = R[lang].st
+          .replace('{c}', stats.tasks.completed)
+          .replace('{t}', stats.tasks.completed + stats.tasks.pending)
+          .replace('{r}', stats.tasks.rate)
+          .replace('{a}', stats.attendance.attended)
+          .replace('{tt}', stats.attendance.total)
+          .replace('{ar}', stats.attendance.rate);
+        await sendMessage(userId, msg, getKeyboard(lang));
+        return { statusCode: 200 };
+      }
+      
+      // Help
+      if (lower === 'help' || lower === 'помощь' || lower === '帮助' || text === "❓ Help") {
+        await sendMessage(userId, R[lang].h, getKeyboard(lang));
+        return { statusCode: 200 };
+      }
+      
+      // Default
+      await sendMessage(userId, R[lang].h, getKeyboard(lang));
+      
+      const elapsed = Date.now() - start;
+      if (elapsed > 500) console.log(`⚠️ Slow: ${elapsed}ms`);
+      
+      return { statusCode: 200 };
     }
     
-    return { statusCode: 200, body: JSON.stringify({ ok: true }) };
+    return { statusCode: 200 };
   } catch (error) {
-    console.error("Handler error:", error);
-    return { statusCode: 500, body: JSON.stringify({ error: error.message }) };
+    console.error("Error:", error);
+    return { statusCode: 200 };
   }
 }
 
+// ========== CLEANUP INTERVAL ==========
+setInterval(() => {
+  // Cache cleanup happens automatically via LRU
+}, 300000);
 
-// ========== START REMINDERS ==========
-startReminders();
-console.log("✅ TIME MANAGEMENT BOT RUNNING PERFECTLY!");
-console.log("📅 Full Schedule Management | 📝 Complete Task Tracking | ✅ Attendance System");
-console.log("⏰ Smart Reminders | 📥 ICS Import | 🌐 Multi-language (EN/RU/ZH)");
-console.log("💾 Full Memory - Remembers everything | ⚡ Optimized for FAST responses");
+console.log("🚀 OPTIMIZED BOT RUNNING");
