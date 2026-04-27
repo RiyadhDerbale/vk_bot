@@ -1526,7 +1526,7 @@ function setCached(key, data) {
 }
 
 function clearCache(userId) {
-  const keys = [`schedule_${userId}`, `tasks_${userId}`, `stats_${userId}`];
+  const keys = [`schedule_${userId}`, `tasks_${userId}`, `stats_${userId}`, `attendance_${userId}`];
   keys.forEach(k => cache.delete(k));
 }
 
@@ -1541,202 +1541,153 @@ function detectLanguage(text) {
 // ========== COMPLETE RESPONSES ==========
 const RESPONSES = {
   en: {
-    welcome: "🎓 Welcome to Smart Hour Bot!\n\nI'm your academic assistant that helps you manage classes, track assignments, and never miss deadlines.\n\nWhat's your name?",
-    name_saved: "🎉 Great to meet you {name}!\n\nI'll help you stay on top of your academic schedule. What would you like to do?",
-    welcome_back: "👋 Welcome back {name}!\n\n📊 Today: {classes} class(es) | 📝 {tasks} pending task(s)\n\nHow can I help you today?",
+    welcome: "🎓 Welcome to Smart Hour Bot!\n\nI'm your academic assistant. What's your name?",
+    name_saved: "🎉 Nice to meet you {name}!\n\nHow can I help you today?",
+    welcome_back: "👋 Welcome back {name}!\n\n📊 Today: {classes} class(es) | 📝 {tasks} task(s)\n\nWhat would you like to do?",
     
-    // Schedule Management
     schedule_today: "📅 **TODAY'S SCHEDULE** - {date}\n\n{classes}─────────────────────\n💡 Reply with class number to mark attendance",
     schedule_tomorrow: "📅 **TOMORROW'S SCHEDULE** - {date}\n\n{classes}",
-    schedule_week: "📅 **WEEKLY SCHEDULE**\n\n{week_schedule}",
-    no_classes: "📭 No classes today {name}! Great time to catch up on assignments.\n\n📝 You have {tasks} pending task(s).",
-    no_classes_tomorrow: "📭 No classes tomorrow {name}! Plan your study time wisely.",
+    no_classes: "📭 No classes today {name}!\n\n📝 You have {tasks} pending task(s). Great time to complete them!",
+    no_classes_tomorrow: "📭 No classes tomorrow {name}! Enjoy your free time!",
     
-    add_class_instruction: "📝 **Add a Class**\n\nSend: /addclass [Subject] [Day] [Start] [End] [Location]\n\n📅 Days: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun\n⏰ Time: HH:MM format\n📍 Location: optional\n\nExample: /addclass Mathematics 1 10:30 12:05 Room 201",
-    class_added: "✅ Class added: {subject} on {day} at {start}-{end}\n📍 {location}\n\n🔔 I'll remind you 60 minutes before each class!",
-    class_deleted: "🗑️ Removed class: {subject}",
-    class_not_found: "❌ Class not found. Use '/myclasses' to see your schedule.",
-    my_classes: "📚 **YOUR CLASSES**\n\n{classes}",
+    next_class: "⏰ **NEXT CLASS**\n\n📚 {subject}\n🕐 Time: {time}\n📍 Location: {location}\n⏱️ Starts in {minutes} minutes\n\n🔔 I'll remind you before class!",
+    no_next_class: "✅ No more classes today {name}!\n\n📝 You have {tasks} task(s) pending.",
+    class_reminder: "🔔 **CLASS REMINDER!**\n\n📚 {subject}\n🕐 {time}\n📍 {location}\n⏱️ Starts in {minutes} minutes!\n\n✅ After class, reply 'mark {subject}' to record attendance.",
     
-    // Next Class & Reminders
-    next_class: "⏰ **NEXT CLASS**\n\n📚 {subject}\n🕐 {time}\n📍 {location}\n⏱️ In {minutes} minutes\n\n🔔 I'll remind you 60 minutes before!",
-    no_next_class: "✅ No more classes today {name}! Time to focus on assignments.\n📝 You have {tasks} pending task(s).",
-    class_reminder: "🔔 **CLASS REMINDER**\n\n📚 {subject}\n🕐 {time}\n📍 {location}\n⏱️ Starts in {minutes} minutes!\n\n✅ After class, reply 'mark {subject}' to record attendance.",
-    reminder_set: "✅ Reminder time updated!\n\n🔔 I'll notify you {minutes} minutes before each class.\nRange: 5-120 minutes",
-    reminder_current: "🔔 Current reminder: {minutes} minutes before class.\n\nUse /reminder <minutes> to change (5-120)",
+    reminder_set: "✅ Reminder updated!\n\n🔔 I'll remind you {minutes} minutes before each class.",
+    reminder_current: "🔔 Current reminder: {minutes} minutes before class.\n\nUse /reminder <minutes> (5-120) to change.",
     
-    // Tasks / Assignments
-    tasks_header: "📋 **YOUR ASSIGNMENTS**\n\n✅ Completed: {completed}\n⏳ Pending: {pending}\n\n{tasks}─────────────────────\n💡 Reply 'done [task name]' to mark complete",
-    no_tasks: "✅ **NO PENDING ASSIGNMENTS** {name}! 🎉\n\n📊 Great job staying on top of your work!\n\n📅 Check your schedule with 'today'",
-    task_added: "✅ **ASSIGNMENT ADDED**\n\n📝 {task}\n📅 Due: {due_date}\n🔔 Reminder: {days} day(s) before\n⚡ Priority: {priority}\n\nI'll remind you before the deadline!",
-    task_completed: "🎉 **CONGRATULATIONS {name}!** 🎉\n\n✅ Completed: {task}\n\n📊 Your productivity score increased! Say 'stats' to see progress.",
+    tasks_header: "📋 **YOUR ASSIGNMENTS**\n\n✅ Completed: {completed}\n⏳ Pending: {pending}\n\n{tasks}─────────────────────\n💬 Reply 'done [task name]' to mark complete",
+    no_tasks: "✅ **NO PENDING ASSIGNMENTS** {name}! 🎉\n\n📊 Great job staying on top of your work!",
+    task_added: "✅ **ASSIGNMENT ADDED**\n\n📝 {task}\n📅 Due: {due_date}\n🔔 Reminder: {days} day(s) before\n⚡ Priority: {priority}",
+    task_completed: "🎉 **CONGRATULATIONS {name}!** 🎉\n\n✅ Completed: {task}\n\n📊 Your productivity score increased!",
     task_deleted: "🗑️ Removed assignment: {task}",
     task_not_found: "❌ Assignment '{task}' not found.\n\n💡 Say 'tasks' to see your current assignments.",
-    task_reminder: "⏰ **ASSIGNMENT REMINDER**\n\n📝 {task}\n📅 Due: {due_date}\n⏱️ {days_left} day(s) left!\n\nDon't forget to complete it!",
-    high_priority_task: "⚠️ **HIGH PRIORITY** ⚠️\n\n{task} is due tomorrow!",
     
-    // Attendance
-    attendance_prompt: "📚 **MARK ATTENDANCE**\n\nToday's classes:\n{classes}\n\n─────────────────────\nReply with NUMBER or CLASS NAME:",
+    attendance_prompt: "📚 **MARK ATTENDANCE**\n\nToday's classes:\n{classes}\n─────────────────────\nReply with NUMBER or CLASS NAME:",
     attendance_marked: "✅ **ATTENDANCE RECORDED**\n\nClass: {class_name}\n{streak_msg}\n📊 Attendance rate updated!",
     already_marked: "ℹ️ You already marked '{class_name}' today! ✅",
     attendance_streak: "🔥 **ATTENDANCE STREAK!** 🔥\n\n{name}, you've attended {streak} classes in a row!\nKeep it up!",
-    attendance_stats_updated: "📊 Your attendance record has been updated!",
     
-    // Statistics
     stats_header: "📊 **YOUR STUDY STATISTICS**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
-    task_stats: "📝 **ASSIGNMENTS**\n• ✅ Completed: {completed}\n• ⏳ Pending: {pending}\n• 🎯 Completion Rate: {rate}%\n   [{bar}]\n• 📈 Productivity Score: {score}/100",
+    task_stats: "📝 **ASSIGNMENTS**\n• ✅ Completed: {completed}\n• ⏳ Pending: {pending}\n• 🎯 Completion Rate: {rate}%\n   [{bar}]",
     attendance_stats: "📚 **CLASS ATTENDANCE**\n• 📖 Total Classes: {total}\n• ✅ Attended: {attended}\n• ❌ Missed: {missed}\n• 📈 Attendance Rate: {rate}%\n   [{bar}]",
     progress_message: "💡 **PRODUCTIVITY INSIGHT**\n{message}",
     
-    // ICS Calendar Import
-    import_instructions: "📥 **IMPORT CALENDAR**\n\nSend me an ICS calendar file to automatically sync your schedule!\n\n📁 How to use:\n1️⃣ Download .ics file from your university portal\n2️⃣ Attach the file to this chat\n3️⃣ I'll extract all classes automatically\n\n🔔 Reminders will be set for each class!\n\n💡 Or use: /ics [calendar-url]",
-    import_progress: "⏳ **Processing your calendar**...\n\nThis may take a few seconds. Please wait ⏳",
-    import_success: "🎉 **CALENDAR IMPORTED!** 🎉\n\n✅ Added {count} classes to your schedule\n🔔 Reminders set {reminder} minutes before each class\n📅 Say 'today' to see your schedule!\n\n📊 Say 'stats' to track your progress!",
-    import_fail: "❌ **IMPORT FAILED**\n\nMake sure you're sending a valid ICS calendar file.\n\n💡 Tips:\n• Download the .ics file from your university\n• Attach it directly to this chat\n• Try again with a valid file",
-    file_import_success: "📁 **CALENDAR IMPORTED FROM FILE**\n\n✅ Added {count} classes to your schedule!",
+    import_instructions: "📥 **IMPORT CALENDAR**\n\nSend me an ICS calendar file to automatically sync your schedule!\n\n📁 How to use:\n1️⃣ Download .ics file from your university portal\n2️⃣ Attach the file to this chat\n3️⃣ I'll extract all classes automatically\n\n💡 Or use: /ics [calendar-url]",
+    import_progress: "⏳ **Processing your calendar**...\n\nPlease wait a moment ⏳",
+    import_success: "🎉 **CALENDAR IMPORTED!** 🎉\n\n✅ Added {count} classes to your schedule\n🔔 Reminders set {reminder} minutes before each class\n📅 Say 'today' to see your schedule!",
+    import_fail: "❌ **IMPORT FAILED**\n\nMake sure you're sending a valid ICS calendar file.\n\n💡 Try downloading the .ics file and attaching it directly.",
     
-    // Help & Commands
-    help_text: "🎓 **SMART HOUR BOT - HELP**\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📅 **SCHEDULE MANAGEMENT**\n• 'today' - Today's classes\n• 'tomorrow' - Tomorrow's classes\n• 'week' - Weekly schedule\n• 'next class' - Upcoming class\n• Send .ics file - Import calendar\n\n✅ **ATTENDANCE TRACKING**\n• 'mark' - Mark today's attendance\n• 'mark [class]' - Quick attendance mark\n\n📝 **ASSIGNMENT TRACKING**\n• 'tasks' - View assignments\n• '/task \"Task\" YYYY-MM-DD HH:MM days priority'\n• 'done [task]' - Complete assignment\n• 'delete [task]' - Remove assignment\n\n⚙️ **REMINDER SETTINGS**\n• '/reminder 45' - Set reminder time\n• '/reminder' - Check current setting\n\n📊 **PROGRESS TRACKING**\n• 'stats' - View your statistics\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n💡 **TIP**: I remember everything! Track your attendance and assignments to see your progress over time.",
+    help_text: "🎓 **SMART HOUR BOT - HELP**\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📅 **SCHEDULE**\n• 'today' - Today's classes\n• 'tomorrow' - Tomorrow's classes\n• 'next class' - Upcoming class\n• Send .ics file - Import calendar\n\n✅ **ATTENDANCE**\n• 'mark' - Mark today's attendance\n• 'mark [class]' - Quick mark\n\n📝 **ASSIGNMENTS**\n• 'tasks' - View assignments\n• '/task \"Task\" 2025-12-20 23:59 3 high'\n• 'done [task]' - Complete assignment\n• 'delete [task]' - Remove assignment\n\n⚙️ **REMINDERS**\n• '/reminder 45' - Set reminder time\n• '/reminder' - Check current setting\n\n📊 **STATISTICS**\n• 'stats' - View your progress\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n💡 I remember everything! Track your attendance and assignments to see your progress over time.",
     
-    // Interactive Menu
-    main_menu: "🎓 **SMART HOUR BOT**\n\nChoose an option below:",
-    
-    // Quick Responses
-    thanks: "😊 You're welcome {name}! Anything else I can help with?\n\n📊 Say 'stats' to see your progress!",
-    goodbye: "👋 Goodbye {name}!\n\n📅 Don't forget to check your schedule tomorrow!\n📝 Stay on top of your assignments!\n\nCome back anytime!",
+    thanks: "😊 You're welcome {name}! Anything else I can help with?",
+    goodbye: "👋 Goodbye {name}! Have a productive day!\n\n📅 Don't forget to check your schedule tomorrow!",
     error: "❌ Oops! Something went wrong.\n\nPlease try again or say 'help' for assistance.",
     unknown: "🤔 I'm not sure about that {name}.\n\nTry one of these commands:\n• 'today' - See your schedule\n• 'tasks' - View assignments\n• 'mark' - Record attendance\n• 'stats' - Check progress\n• 'help' - All commands",
     
-    // Status
-    ping: "🏓 Pong! Bot is active and ready!\n\n📅 Schedule loaded: {classes} classes\n📝 Tasks tracked: {tasks} assignments\n✅ Ready to help!",
-    status: "🟢 **SMART HOUR BOT - ONLINE**\n\n📊 System Status:\n• Schedule Management: ✅\n• Task Tracking: ✅\n• Attendance System: ✅\n• Reminders: ✅\n• ICS Import: ✅\n\nReady to help you stay organized! 🎓",
-    about: "🎓 **Smart Hour Bot v2.0**\n\nI'm your academic assistant designed to help university students manage their schedule and deadlines directly through VK.\n\n📅 Schedule Management\n📝 Assignment Tracking\n✅ Attendance Recording\n⏰ Smart Reminders\n📥 Calendar Import\n\nStay organized and never miss a deadline! 🚀"
+    ping: "🏓 Pong! Bot is active and ready!",
+    status: "🟢 **SMART HOUR BOT - ONLINE**\n\n✅ Schedule Management\n✅ Task Tracking\n✅ Attendance System\n✅ Smart Reminders\n✅ ICS Import\n\nReady to help you stay organized! 🎓"
   },
   
   ru: {
     welcome: "🎓 Добро пожаловать в Smart Hour Bot!\n\nЯ твой академический помощник. Как тебя зовут?",
-    name_saved: "🎉 Приятно познакомиться {name}!\n\nЯ помогу тебе следить за расписанием и дедлайнами. Что хочешь сделать?",
-    welcome_back: "👋 С возвращением {name}!\n\n📊 Сегодня: {classes} пар(ы) | 📝 {tasks} задач(и)\n\nЧем помочь?",
+    name_saved: "🎉 Приятно познакомиться {name}!\n\nЧем я могу помочь сегодня?",
+    welcome_back: "👋 С возвращением {name}!\n\n📊 Сегодня: {classes} пар(ы) | 📝 {tasks} задач(и)\n\nЧто хочешь сделать?",
     
     schedule_today: "📅 **РАСПИСАНИЕ НА СЕГОДНЯ** - {date}\n\n{classes}─────────────────────\n💡 Ответь номером чтобы отметить посещение",
     schedule_tomorrow: "📅 **РАСПИСАНИЕ НА ЗАВТРА** - {date}\n\n{classes}",
-    schedule_week: "📅 **РАСПИСАНИЕ НА НЕДЕЛЮ**\n\n{week_schedule}",
-    no_classes: "📭 Сегодня нет пар {name}! Отличное время для задач.\n\n📝 У тебя {tasks} задач(и).",
-    no_classes_tomorrow: "📭 Завтра нет пар {name}! Планируй время wisely.",
+    no_classes: "📭 Сегодня нет пар {name}!\n\n📝 У тебя {tasks} задач(и). Отличное время чтобы их выполнить!",
+    no_classes_tomorrow: "📭 Завтра нет пар {name}! Наслаждайся свободным временем!",
     
-    add_class_instruction: "📝 **Добавить пару**\n\nОтправь: /addclass [Предмет] [День] [Начало] [Конец] [Место]\n\n📅 Дни: 0=Пн, 1=Вт, 2=Ср, 3=Чт, 4=Пт, 5=Сб, 6=Вс\n⏰ Время: ЧЧ:ММ\n📍 Место: опционально\n\nПример: /addclass Математика 1 10:30 12:05 Ауд 201",
-    class_added: "✅ Пара добавлена: {subject} в {day} {start}-{end}\n📍 {location}\n\n🔔 Напомню за 60 минут!",
-    class_deleted: "🗑️ Удалена пара: {subject}",
-    class_not_found: "❌ Пара не найдена. Используй '/myclasses' для просмотра.",
-    my_classes: "📚 **ТВОИ ПАРЫ**\n\n{classes}",
+    next_class: "⏰ **СЛЕДУЮЩАЯ ПАРА**\n\n📚 {subject}\n🕐 Время: {time}\n📍 Место: {location}\n⏱️ Через {minutes} минут\n\n🔔 Я напомню перед парой!",
+    no_next_class: "✅ На сегодня пар больше нет {name}!\n\n📝 У тебя {tasks} задач(и).",
+    class_reminder: "🔔 **НАПОМИНАНИЕ О ПАРЕ!**\n\n📚 {subject}\n🕐 {time}\n📍 {location}\n⏱️ Начинается через {minutes} минут!\n\n✅ После пары ответь 'отметить {subject}' чтобы записать посещение.",
     
-    next_class: "⏰ **СЛЕДУЮЩАЯ ПАРА**\n\n📚 {subject}\n🕐 {time}\n📍 {location}\n⏱️ Через {minutes} минут\n\n🔔 Напомню за 60 минут!",
-    no_next_class: "✅ Сегодня больше нет пар {name}! Время для задач.\n📝 У тебя {tasks} задач(и).",
-    class_reminder: "🔔 **НАПОМИНАНИЕ О ПАРЕ**\n\n📚 {subject}\n🕐 {time}\n📍 {location}\n⏱️ Начинается через {minutes} минут!\n\n✅ После пары ответь 'отметить {subject}' для посещения.",
-    reminder_set: "✅ Напоминание обновлено!\n\n🔔 Напомню за {minutes} минут до пары.\nДиапазон: 5-120 минут",
-    reminder_current: "🔔 Сейчас: напоминание за {minutes} минут до пары.\n\nИспользуй /reminder <минуты> для изменения (5-120)",
+    reminder_set: "✅ Напоминание обновлено!\n\n🔔 Напомню за {minutes} минут до пары.",
+    reminder_current: "🔔 Текущее напоминание: за {minutes} минут до пары.\n\nИспользуй /reminder <минуты> (5-120) чтобы изменить.",
     
-    tasks_header: "📋 **ТВОИ ЗАДАЧИ**\n\n✅ Выполнено: {completed}\n⏳ Ожидает: {pending}\n\n{tasks}─────────────────────\n💡 Ответь 'готово [задача]' для отметки",
-    no_tasks: "✅ **НЕТ АКТИВНЫХ ЗАДАЧ** {name}! 🎉\n\n📊 Отличная работа!\n\n📅 Проверь расписание 'сегодня'",
+    tasks_header: "📋 **ТВОИ ЗАДАЧИ**\n\n✅ Выполнено: {completed}\n⏳ Ожидает: {pending}\n\n{tasks}─────────────────────\n💬 Ответь 'готово [задача]' чтобы отметить",
+    no_tasks: "✅ **НЕТ АКТИВНЫХ ЗАДАЧ** {name}! 🎉\n\n📊 Отличная работа!",
     task_added: "✅ **ЗАДАЧА ДОБАВЛЕНА**\n\n📝 {task}\n📅 Дедлайн: {due_date}\n🔔 Напомню за {days} дн.\n⚡ Приоритет: {priority}",
-    task_completed: "🎉 **ПОЗДРАВЛЯЮ {name}!** 🎉\n\n✅ Выполнено: {task}\n\n📊 Твоя продуктивность выросла! Скажи 'статистика'.",
+    task_completed: "🎉 **ПОЗДРАВЛЯЮ {name}!** 🎉\n\n✅ Выполнено: {task}\n\n📊 Твоя продуктивность выросла!",
     task_deleted: "🗑️ Удалена задача: {task}",
-    task_not_found: "❌ Задача '{task}' не найдена.\n\n💡 Скажи 'задачи' для просмотра.",
-    task_reminder: "⏰ **НАПОМИНАНИЕ О ЗАДАЧЕ**\n\n📝 {task}\n📅 Дедлайн: {due_date}\n⏱️ Осталось {days_left} дн.\n\nНе забудь выполнить!",
-    high_priority_task: "⚠️ **ВЫСОКИЙ ПРИОРИТЕТ** ⚠️\n\n{task} завтра дедлайн!",
+    task_not_found: "❌ Задача '{task}' не найдена.\n\n💡 Скажи 'задачи' чтобы увидеть список.",
     
-    attendance_prompt: "📚 **ОТМЕТИТЬ ПОСЕЩЕНИЕ**\n\nПары сегодня:\n{classes}\n\n─────────────────────\nОтветь НОМЕРОМ или НАЗВАНИЕМ:",
+    attendance_prompt: "📚 **ОТМЕТИТЬ ПОСЕЩЕНИЕ**\n\nПары сегодня:\n{classes}\n─────────────────────\nОтветь НОМЕРОМ или НАЗВАНИЕМ:",
     attendance_marked: "✅ **ПОСЕЩЕНИЕ ОТМЕЧЕНО**\n\nПара: {class_name}\n{streak_msg}\n📊 Посещаемость обновлена!",
     already_marked: "ℹ️ Ты уже отметил '{class_name}' сегодня! ✅",
     attendance_streak: "🔥 **СЕРИЯ ПОСЕЩЕНИЙ!** 🔥\n\n{name}, ты посетил {streak} пар(ы) подряд!\nТак держать!",
-    attendance_stats_updated: "📊 Твоя посещаемость обновлена!",
     
     stats_header: "📊 **ТВОЯ СТАТИСТИКА УЧЁБЫ**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
-    task_stats: "📝 **ЗАДАЧИ**\n• ✅ Выполнено: {completed}\n• ⏳ Ожидает: {pending}\n• 🎯 Процент: {rate}%\n   [{bar}]\n• 📈 Продуктивность: {score}/100",
+    task_stats: "📝 **ЗАДАЧИ**\n• ✅ Выполнено: {completed}\n• ⏳ Ожидает: {pending}\n• 🎯 Процент: {rate}%\n   [{bar}]",
     attendance_stats: "📚 **ПОСЕЩАЕМОСТЬ**\n• 📖 Всего пар: {total}\n• ✅ Посещено: {attended}\n• ❌ Пропущено: {missed}\n• 📈 Процент: {rate}%\n   [{bar}]",
     progress_message: "💡 **СОВЕТ ПО ПРОДУКТИВНОСТИ**\n{message}",
     
-    import_instructions: "📥 **ИМПОРТ РАСПИСАНИЯ**\n\nОтправь мне ICS файл календаря для автоматической синхронизации!\n\n📁 Как использовать:\n1️⃣ Скачай .ics файл из университетского портала\n2️⃣ Прикрепи файл к этому сообщению\n3️⃣ Я извлеку все пары автоматически\n\n🔔 Напоминания будут установлены для каждой пары!\n\n💡 Или используй: /ics [ссылка]",
-    import_progress: "⏳ **Обрабатываю календарь**...\n\nЭто может занять несколько секунд. Пожалуйста, подожди ⏳",
-    import_success: "🎉 **КАЛЕНДАРЬ ИМПОРТИРОВАН!** 🎉\n\n✅ Добавлено {count} пар в расписание\n🔔 Напоминания за {reminder} минут\n📅 Скажи 'сегодня' для просмотра!\n\n📊 Скажи 'статистика' для отслеживания прогресса!",
-    import_fail: "❌ **ОШИБКА ИМПОРТА**\n\nУбедись что отправляешь правильный ICS файл.\n\n💡 Советы:\n• Скачай .ics файл из университета\n• Прикрепи его к этому чату\n• Попробуй снова",
-    file_import_success: "📁 **КАЛЕНДАРЬ ИМПОРТИРОВАН ИЗ ФАЙЛА**\n\n✅ Добавлено {count} пар в расписание!",
+    import_instructions: "📥 **ИМПОРТ РАСПИСАНИЯ**\n\nОтправь мне ICS файл чтобы автоматически синхронизировать расписание!\n\n📁 Как использовать:\n1️⃣ Скачай .ics файл из университетского портала\n2️⃣ Прикрепи файл к этому сообщению\n3️⃣ Я извлеку все пары автоматически\n\n💡 Или используй: /ics [ссылка]",
+    import_progress: "⏳ **Обрабатываю календарь**...\n\nПожалуйста, подожди ⏳",
+    import_success: "🎉 **КАЛЕНДАРЬ ИМПОРТИРОВАН!** 🎉\n\n✅ Добавлено {count} пар в расписание\n🔔 Напоминания за {reminder} минут\n📅 Скажи 'сегодня' чтобы увидеть расписание!",
+    import_fail: "❌ **ОШИБКА ИМПОРТА**\n\nУбедись что отправляешь правильный ICS файл.\n\n💡 Попробуй скачать .ics файл и прикрепить его напрямую.",
     
-    help_text: "🎓 **SMART HOUR BOT - ПОМОЩЬ**\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📅 **РАСПИСАНИЕ**\n• 'сегодня' - Пары сегодня\n• 'завтра' - Пары завтра\n• 'неделя' - Расписание на неделю\n• 'следующая пара' - Следующая пара\n• Отправь .ics - Импорт календаря\n\n✅ **ПОСЕЩАЕМОСТЬ**\n• 'отметить' - Отметить пары\n• 'отметить [пара]' - Быстрая отметка\n\n📝 **ЗАДАЧИ**\n• 'задачи' - Список задач\n• '/task \"Задача\" 2025-12-20 23:59 3 high'\n• 'готово [задача]' - Выполнить\n• 'удалить [задача]' - Удалить\n\n⚙️ **НАПОМИНАНИЯ**\n• '/reminder 45' - Установить время\n• '/reminder' - Текущая настройка\n\n📊 **СТАТИСТИКА**\n• 'статистика' - Твой прогресс\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n💡 **СОВЕТ**: Я всё помню! Отмечай посещаемость и выполняй задачи, чтобы видеть свой прогресс.",
+    help_text: "🎓 **SMART HOUR BOT - ПОМОЩЬ**\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📅 **РАСПИСАНИЕ**\n• 'сегодня' - Пары сегодня\n• 'завтра' - Пары завтра\n• 'следующая пара' - Следующая пара\n• Отправь .ics файл - Импорт\n\n✅ **ПОСЕЩАЕМОСТЬ**\n• 'отметить' - Отметить пары\n• 'отметить [пара]' - Быстрая отметка\n\n📝 **ЗАДАЧИ**\n• 'задачи' - Список задач\n• '/task \"Задача\" 2025-12-20 23:59 3 high'\n• 'готово [задача]' - Выполнить\n• 'удалить [задача]' - Удалить\n\n⚙️ **НАПОМИНАНИЯ**\n• '/reminder 45' - Установить время\n• '/reminder' - Текущая настройка\n\n📊 **СТАТИСТИКА**\n• 'статистика' - Твой прогресс\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n💡 Я всё помню! Отмечай посещаемость и выполняй задачи, чтобы видеть свой прогресс.",
     
-    main_menu: "🎓 **SMART HOUR BOT**\n\nВыбери опцию ниже:",
-    
-    thanks: "😊 Пожалуйста {name}! Ещё чем помочь?\n\n📊 Скажи 'статистика' для просмотра прогресса!",
-    goodbye: "👋 До свидания {name}!\n\n📅 Не забудь проверить расписание завтра!\n📝 Выполняй задачи вовремя!\n\nВозвращайся в любое время!",
+    thanks: "😊 Пожалуйста {name}! Ещё чем помочь?",
+    goodbye: "👋 До свидания {name}! Продуктивного дня!\n\n📅 Не забудь проверить расписание завтра!",
     error: "❌ Упс! Что-то пошло не так.\n\nПожалуйста, попробуй ещё раз или скажи 'помощь'.",
     unknown: "🤔 Я не уверен насчёт этого {name}.\n\nПопробуй одну из команд:\n• 'сегодня' - Расписание\n• 'задачи' - Список задач\n• 'отметить' - Посещаемость\n• 'статистика' - Прогресс\n• 'помощь' - Все команды",
     
-    ping: "🏓 Понг! Бот активен и готов!\n\n📅 Загружено пар: {classes}\n📝 Задач отслеживается: {tasks}\n✅ Готов помочь!",
-    status: "🟢 **SMART HOUR BOT - ОНЛАЙН**\n\n📊 Статус системы:\n• Управление расписанием: ✅\n• Отслеживание задач: ✅\n• Система посещений: ✅\n• Напоминания: ✅\n• Импорт ICS: ✅\n\nГотов помочь оставаться организованным! 🎓",
-    about: "🎓 **Smart Hour Bot v2.0**\n\nЯ твой академический помощник для управления расписанием и дедлайнами через ВК.\n\n📅 Управление расписанием\n📝 Отслеживание задач\n✅ Запись посещений\n⏰ Умные напоминания\n📥 Импорт календаря\n\nБудь организован и не пропускай дедлайны! 🚀"
+    ping: "🏓 Понг! Бот активен и готов!",
+    status: "🟢 **SMART HOUR BOT - ОНЛАЙН**\n\n✅ Управление расписанием\n✅ Отслеживание задач\n✅ Система посещений\n✅ Умные напоминания\n✅ Импорт ICS\n\nГотов помочь оставаться организованным! 🎓"
   },
   
   zh: {
     welcome: "🎓 欢迎使用智能课时机器人！\n\n我是你的学术助手。请问你叫什么名字？",
-    name_saved: "🎉 很高兴认识你{name}！\n\n我会帮你管理课程安排和作业截止日期。你想做什么？",
-    welcome_back: "👋 欢迎回来{name}！\n\n📊 今天：{classes}节课 | 📝 {tasks}个任务\n\n今天需要什么帮助？",
+    name_saved: "🎉 很高兴认识你{name}！\n\n今天我能帮你什么？",
+    welcome_back: "👋 欢迎回来{name}！\n\n📊 今天：{classes}节课 | 📝 {tasks}个任务\n\n你想做什么？",
     
     schedule_today: "📅 **今日课表** - {date}\n\n{classes}─────────────────────\n💡 回复课程编号标记出勤",
     schedule_tomorrow: "📅 **明日课表** - {date}\n\n{classes}",
-    schedule_week: "📅 **周课表**\n\n{week_schedule}",
-    no_classes: "📭 今天没课{name}！正好处理任务。\n\n📝 你有{tasks}个待办任务。",
-    no_classes_tomorrow: "📭 明天没课{name}！合理安排学习时间。",
+    no_classes: "📭 今天没课{name}！\n\n📝 你有{tasks}个待办任务。正好处理它们！",
+    no_classes_tomorrow: "📭 明天没课{name}！享受你的空闲时间！",
     
-    add_class_instruction: "📝 **添加课程**\n\n发送：/addclass [科目] [星期] [开始] [结束] [地点]\n\n📅 星期：0=一,1=二,2=三,3=四,4=五,5=六,6=日\n⏰ 时间：HH:MM格式\n📍 地点：可选\n\n示例：/addclass 数学 1 10:30 12:05 201教室",
-    class_added: "✅ 课程已添加：{subject} 星期{day} {start}-{end}\n📍 {location}\n\n🔔 我会提前60分钟提醒你！",
-    class_deleted: "🗑️ 已删除课程：{subject}",
-    class_not_found: "❌ 未找到课程。使用'/myclasses'查看课表。",
-    my_classes: "📚 **你的课程**\n\n{classes}",
+    next_class: "⏰ **下节课**\n\n📚 {subject}\n🕐 时间：{time}\n📍 地点：{location}\n⏱️ {minutes}分钟后开始\n\n🔔 我会提前提醒你！",
+    no_next_class: "✅ 今天没课了{name}！\n\n📝 你有{tasks}个待办任务。",
+    class_reminder: "🔔 **上课提醒！**\n\n📚 {subject}\n🕐 {time}\n📍 {location}\n⏱️ {minutes}分钟后开始！\n\n✅ 课后回复'标记{subject}'记录出勤。",
     
-    next_class: "⏰ **下节课**\n\n📚 {subject}\n🕐 {time}\n📍 {location}\n⏱️ {minutes}分钟后开始\n\n🔔 我会提前60分钟提醒！",
-    no_next_class: "✅ 今天没课了{name}！处理任务吧。\n📝 你有{tasks}个待办任务。",
-    class_reminder: "🔔 **上课提醒**\n\n📚 {subject}\n🕐 {time}\n📍 {location}\n⏱️ {minutes}分钟后开始！\n\n✅ 课后回复'标记{subject}'记录出勤。",
-    reminder_set: "✅ 提醒时间已更新！\n\n🔔 我会在课前{minutes}分钟通知你。\n范围：5-120分钟",
-    reminder_current: "🔔 当前提醒：课前{minutes}分钟。\n\n使用 /reminder <分钟> 更改(5-120)",
+    reminder_set: "✅ 提醒已更新！\n\n🔔 我会在课前{minutes}分钟提醒你。",
+    reminder_current: "🔔 当前提醒：课前{minutes}分钟。\n\n使用 /reminder <分钟> (5-120) 更改。",
     
-    tasks_header: "📋 **你的作业**\n\n✅ 已完成：{completed}\n⏳ 待办：{pending}\n\n{tasks}─────────────────────\n💡 回复'完成 [任务名]'标记完成",
-    no_tasks: "✅ **没有待办任务** {name}！🎉\n\n📊 你做得很好！\n\n📅 说'今天'查看课表",
+    tasks_header: "📋 **你的作业**\n\n✅ 已完成：{completed}\n⏳ 待办：{pending}\n\n{tasks}─────────────────────\n💬 回复'完成 [任务名]'标记完成",
+    no_tasks: "✅ **没有待办作业** {name}！🎉\n\n📊 你做得很好！",
     task_added: "✅ **作业已添加**\n\n📝 {task}\n📅 截止：{due_date}\n🔔 提前{days}天提醒\n⚡ 优先级：{priority}",
-    task_completed: "🎉 **恭喜{name}！** 🎉\n\n✅ 已完成：{task}\n\n📊 你的生产力提高了！说'统计'查看进度。",
+    task_completed: "🎉 **恭喜{name}！** 🎉\n\n✅ 已完成：{task}\n\n📊 你的生产力提高了！",
     task_deleted: "🗑️ 已删除作业：{task}",
     task_not_found: "❌ 找不到作业'{task}'。\n\n💡 说'任务'查看当前作业。",
-    task_reminder: "⏰ **作业提醒**\n\n📝 {task}\n📅 截止：{due_date}\n⏱️ 还剩{days_left}天！\n\n别忘了完成！",
-    high_priority_task: "⚠️ **高优先级** ⚠️\n\n{task} 明天截止！",
     
-    attendance_prompt: "📚 **标记出勤**\n\n今日课程：\n{classes}\n\n─────────────────────\n回复数字或课程名称：",
+    attendance_prompt: "📚 **标记出勤**\n\n今日课程：\n{classes}\n─────────────────────\n回复数字或课程名称：",
     attendance_marked: "✅ **出勤已记录**\n\n课程：{class_name}\n{streak_msg}\n📊 出勤率已更新！",
     already_marked: "ℹ️ 你今天已经标记过'{class_name}'了！✅",
     attendance_streak: "🔥 **出勤连续记录！** 🔥\n\n{name}，你已经连续出勤{streak}节课！\n继续加油！",
-    attendance_stats_updated: "📊 你的出勤记录已更新！",
     
     stats_header: "📊 **你的学习统计**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
-    task_stats: "📝 **作业**\n• ✅ 已完成：{completed}\n• ⏳ 待办：{pending}\n• 🎯 完成率：{rate}%\n   [{bar}]\n• 📈 生产力分数：{score}/100",
+    task_stats: "📝 **作业**\n• ✅ 已完成：{completed}\n• ⏳ 待办：{pending}\n• 🎯 完成率：{rate}%\n   [{bar}]",
     attendance_stats: "📚 **出勤**\n• 📖 总计：{total}\n• ✅ 已出勤：{attended}\n• ❌ 缺勤：{missed}\n• 📈 出勤率：{rate}%\n   [{bar}]",
     progress_message: "💡 **生产力洞察**\n{message}",
     
-    import_instructions: "📥 **导入课表**\n\n发送ICS日历文件自动同步课表！\n\n📁 使用方法：\n1️⃣ 从学校网站下载.ics文件\n2️⃣ 在对话中附件发送文件\n3️⃣ 我会自动提取所有课程\n\n🔔 每节课都会设置提醒！\n\n💡 或使用：/ics [日历链接]",
-    import_progress: "⏳ **正在处理日历**...\n\n可能需要几秒钟。请稍等 ⏳",
-    import_success: "🎉 **日历导入成功！** 🎉\n\n✅ 已添加{count}门课程\n🔔 课前{reminder}分钟提醒\n📅 说'今天'查看课表！\n\n📊 说'统计'跟踪进度！",
-    import_fail: "❌ **导入失败**\n\n请确保发送的是有效的ICS日历文件。\n\n💡 提示：\n• 从学校下载.ics文件\n• 直接附件发送\n• 再试一次",
-    file_import_success: "📁 **已从文件导入日历**\n\n✅ 已添加{count}门课程到课表！",
+    import_instructions: "📥 **导入课表**\n\n发送ICS日历文件自动同步课表！\n\n📁 使用方法：\n1️⃣ 从学校网站下载.ics文件\n2️⃣ 在对话中附件发送文件\n3️⃣ 我会自动提取所有课程\n\n💡 或使用：/ics [日历链接]",
+    import_progress: "⏳ **正在处理日历**...\n\n请稍等 ⏳",
+    import_success: "🎉 **日历导入成功！** 🎉\n\n✅ 已添加{count}门课程\n🔔 课前{reminder}分钟提醒\n📅 说'今天'查看课表！",
+    import_fail: "❌ **导入失败**\n\n请确保发送的是有效的ICS日历文件。\n\n💡 尝试下载.ics文件并直接附件发送。",
     
-    help_text: "🎓 **智能课时机器人 - 帮助**\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📅 **课表管理**\n• '今天' - 今日课程\n• '明天' - 明日课程\n• '周课表' - 周课表\n• '下节课' - 下一节课\n• 发送.ics文件 - 导入日历\n\n✅ **出勤跟踪**\n• '标记' - 标记今日出勤\n• '标记 [课程]' - 快速标记\n\n📝 **作业跟踪**\n• '任务' - 查看作业\n• '/task \"作业\" 2025-12-20 23:59 3 high'\n• '完成 [作业]' - 完成作业\n• '删除 [作业]' - 删除作业\n\n⚙️ **提醒设置**\n• '/reminder 45' - 设置提醒时间\n• '/reminder' - 查看当前设置\n\n📊 **进度跟踪**\n• '统计' - 查看你的统计\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n💡 **提示**：我能记住一切！标记出勤和完成任务，看到你的进步。",
+    help_text: "🎓 **智能课时机器人 - 帮助**\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📅 **课表**\n• '今天' - 今日课程\n• '明天' - 明日课程\n• '下节课' - 下一节课\n• 发送.ics文件 - 导入日历\n\n✅ **出勤**\n• '标记' - 标记今日出勤\n• '标记 [课程]' - 快速标记\n\n📝 **作业**\n• '任务' - 查看作业\n• '/task \"作业\" 2025-12-20 23:59 3 high'\n• '完成 [作业]' - 完成作业\n• '删除 [作业]' - 删除作业\n\n⚙️ **提醒**\n• '/reminder 45' - 设置提醒时间\n• '/reminder' - 查看当前设置\n\n📊 **统计**\n• '统计' - 查看进度\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n💡 我能记住一切！标记出勤和完成任务，看到你的进步。",
     
-    main_menu: "🎓 **智能课时机器人**\n\n选择以下选项：",
-    
-    thanks: "😊 不客气{name}！还有什么需要帮忙的吗？\n\n📊 说'统计'查看你的进度！",
-    goodbye: "👋 再见{name}！\n\n📅 别忘了查看明天的课表！\n📝 按时完成任务！\n\n随时回来！",
+    thanks: "😊 不客气{name}！还需要什么帮助吗？",
+    goodbye: "👋 再见{name}！祝有高效的一天！\n\n📅 别忘了查看明天的课表！",
     error: "❌ 哎呀！出了点问题。\n\n请再试一次或说'帮助'。",
     unknown: "🤔 我不太确定{name}的意思。\n\n试试以下命令：\n• '今天' - 查看课表\n• '任务' - 查看作业\n• '标记' - 记录出勤\n• '统计' - 查看进度\n• '帮助' - 所有命令",
     
-    ping: "🏓 Pong！机器人活跃且就绪！\n\n📅 已加载课程：{classes}门\n📝 跟踪作业：{tasks}个\n✅ 准备就绪！",
-    status: "🟢 **智能课时机器人 - 在线**\n\n📊 系统状态：\n• 课表管理：✅\n• 作业跟踪：✅\n• 出勤系统：✅\n• 提醒功能：✅\n• ICS导入：✅\n\n准备好帮你保持组织！🎓",
-    about: "🎓 **智能课时机器人 v2.0**\n\n我是你的学术助手，通过VK帮助大学生管理课程安排和截止日期。\n\n📅 课表管理\n📝 作业跟踪\n✅ 出勤记录\n⏰ 智能提醒\n📥 日历导入\n\n保持组织，永不错过截止日期！🚀"
+    ping: "🏓 Pong！机器人活跃且就绪！",
+    status: "🟢 **智能课时机器人 - 在线**\n\n✅ 课表管理\n✅ 作业跟踪\n✅ 出勤系统\n✅ 智能提醒\n✅ ICS导入\n\n准备好帮你保持组织！🎓"
   }
 };
 
@@ -1796,7 +1747,9 @@ function getMainKeyboard(lang) {
 
 function getResponse(lang, key, vars = {}) {
   let text = RESPONSES[lang]?.[key] || RESPONSES.en[key] || key;
-  Object.entries(vars).forEach(([k, v]) => text = text.replace(new RegExp(`{${k}}`, 'g'), v));
+  Object.entries(vars).forEach(([k, v]) => {
+    text = text.replace(new RegExp(`{${k}}`, 'g'), v);
+  });
   return text;
 }
 
@@ -1869,13 +1822,6 @@ async function getTomorrowClasses(userId) {
   return schedule.filter(c => c.day === day);
 }
 
-async function getWeekSchedule(userId) {
-  const schedule = await getSchedule(userId);
-  const weekMap = { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
-  schedule.forEach(c => weekMap[c.day].push(c));
-  return weekMap;
-}
-
 async function getNextClass(userId) {
   const now = new Date();
   const currentDay = (now.getDay() + 6) % 7;
@@ -1889,20 +1835,6 @@ async function getNextClass(userId) {
     if (c.day > currentDay || (c.day === currentDay && classMin > currentMin)) return c;
   }
   return sorted[0] || null;
-}
-
-async function deleteClass(userId, subject, day, startTime) {
-  try {
-    await supabase
-      .from("schedule")
-      .delete()
-      .eq("user_id", userId)
-      .eq("subject", subject)
-      .eq("day", day)
-      .eq("start_time", startTime);
-    clearCache(userId);
-    return true;
-  } catch { return false; }
 }
 
 // ========== TASK FUNCTIONS ==========
@@ -1964,8 +1896,7 @@ async function getTaskStats(userId) {
   const pending = tasks.filter(t => !t.done).length;
   const completed = tasks.filter(t => t.done).length;
   const rate = tasks.length ? Math.round(completed / tasks.length * 100) : 0;
-  const score = Math.min(100, Math.floor(rate * 0.9 + (completed * 2)));
-  return { pending, completed, rate, score };
+  return { pending, completed, rate };
 }
 
 // ========== ATTENDANCE FUNCTIONS ==========
@@ -2032,7 +1963,7 @@ async function getAttendanceStats(userId) {
   } catch { return { total: 0, attended: 0, missed: 0, rate: 0 }; }
 }
 
-// ========== ICS CALENDAR IMPORT ==========
+// ========== ICS IMPORT ==========
 async function importICSFromUrl(userId, url) {
   try {
     const controller = new AbortController();
@@ -2064,9 +1995,8 @@ async function importICSFromFile(userId, fileUrl) {
 async function parseICSAndSave(userId, icsContent) {
   try {
     const lines = icsContent.split(/\r?\n/);
-    const events = [];
-    let currentEvent = null;
     let addedCount = 0;
+    let currentEvent = null;
     
     for (const line of lines) {
       const trimmed = line.trim();
@@ -2075,56 +2005,49 @@ async function parseICSAndSave(userId, icsContent) {
         currentEvent = {};
       } else if (trimmed === 'END:VEVENT' && currentEvent) {
         if (currentEvent.summary && currentEvent.summary !== '') {
-          events.push(currentEvent);
+          let startTime = '09:00';
+          let endTime = '10:00';
+          let dayOfWeek = 0;
+          
+          if (currentEvent.dtstart) {
+            const match = currentEvent.dtstart.match(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/);
+            if (match) {
+              const year = parseInt(match[1]);
+              const month = parseInt(match[2]);
+              const day = parseInt(match[3]);
+              const hour = parseInt(match[4]);
+              const minute = parseInt(match[5]);
+              
+              const date = new Date(year, month - 1, day, hour, minute);
+              dayOfWeek = (date.getDay() + 6) % 7;
+              startTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+            }
+          }
+          
+          if (currentEvent.dtend) {
+            const match = currentEvent.dtend.match(/T(\d{2})(\d{2})/);
+            if (match) {
+              endTime = `${match[1]}:${match[2]}`;
+            }
+          }
+          
+          const success = await addClass(userId, currentEvent.summary, dayOfWeek, startTime, endTime, currentEvent.location || '');
+          if (success) addedCount++;
         }
         currentEvent = null;
       } else if (currentEvent) {
         if (trimmed.startsWith('SUMMARY:')) {
           currentEvent.summary = trimmed.substring(8).replace(/\\,/g, ',').replace(/\\n/g, ' ').trim();
         } else if (trimmed.startsWith('DTSTART')) {
-          const match = trimmed.match(/DTSTART(?:;TZID=[^:]+)?:(\d{8}T\d{6})/);
-          if (match) {
-            currentEvent.dtstart = match[1];
-          }
+          currentEvent.dtstart = trimmed;
         } else if (trimmed.startsWith('DTEND')) {
-          const match = trimmed.match(/DTEND(?:;TZID=[^:]+)?:(\d{8}T\d{6})/);
-          if (match) {
-            currentEvent.dtend = match[1];
-          }
+          currentEvent.dtend = trimmed;
         } else if (trimmed.startsWith('LOCATION:')) {
           currentEvent.location = trimmed.substring(9).replace(/\\,/g, ',').replace(/\\n/g, ' ').trim();
         }
       }
     }
     
-    for (const event of events) {
-      let startTime = '09:00';
-      let endTime = '10:00';
-      let dayOfWeek = 0;
-      
-      if (event.dtstart) {
-        const year = parseInt(event.dtstart.substring(0, 4));
-        const month = parseInt(event.dtstart.substring(4, 6));
-        const day = parseInt(event.dtstart.substring(6, 8));
-        const hour = parseInt(event.dtstart.substring(9, 11));
-        const minute = parseInt(event.dtstart.substring(11, 13));
-        
-        const date = new Date(year, month - 1, day, hour, minute);
-        dayOfWeek = (date.getDay() + 6) % 7;
-        startTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-        
-        if (event.dtend) {
-          const endHour = parseInt(event.dtend.substring(9, 11));
-          const endMinute = parseInt(event.dtend.substring(11, 13));
-          endTime = `${String(endHour).padStart(2, '0')}:${String(endMinute).padStart(2, '0')}`;
-        }
-      }
-      
-      const success = await addClass(userId, event.summary, dayOfWeek, startTime, endTime, event.location || '');
-      if (success) addedCount++;
-    }
-    
-    clearCache(userId);
     return addedCount;
   } catch (error) {
     console.error("Parse ICS error:", error);
@@ -2148,54 +2071,23 @@ async function checkReminders() {
       const schedule = await getSchedule(user.vk_id);
       const offset = user.reminder_offset || 60;
       const lang = user.language || 'en';
-      const name = user.name || 'friend';
       
-      // Class reminders
       for (const cls of schedule.filter(c => c.day === currentDay)) {
         const [hours, minutes] = cls.start_time.split(':').map(Number);
         const classMin = hours * 60 + minutes;
         const remindMin = classMin - offset;
         
         if (remindMin <= currentMin && currentMin <= remindMin + 2) {
-          const key = `class_remind_${user.vk_id}_${currentDay}_${cls.start_time}_${now.toDateString()}`;
+          const key = `remind_${user.vk_id}_${currentDay}_${cls.start_time}_${now.toDateString()}`;
           const { data: existing } = await supabase.from("reminders").select("key").eq("key", key).single();
           
           if (!existing) {
             const minutesUntil = classMin - currentMin;
             const msg = getResponse(lang, 'class_reminder', {
-              subject: cls.subject, time: cls.start_time, location: cls.location || 'Classroom',
-              minutes: minutesUntil, name
+              subject: cls.subject, time: cls.start_time, location: cls.location || 'Classroom', minutes: minutesUntil
             });
             await sendMessage(user.vk_id, msg, getMainKeyboard(lang));
             await supabase.from("reminders").insert({ key });
-          }
-        }
-      }
-      
-      // Task reminders
-      const tasks = await getTasks(user.vk_id, true);
-      for (const task of tasks) {
-        const dueDate = new Date(task.due_date);
-        const daysUntil = Math.ceil((dueDate - now) / (1000 * 60 * 60 * 24));
-        
-        if (daysUntil <= task.remind_days && daysUntil > 0 && !task.reminded) {
-          const key = `task_remind_${task.id}_${now.toDateString()}`;
-          const { data: existing } = await supabase.from("reminders").select("key").eq("key", key).single();
-          
-          if (!existing) {
-            let msg;
-            if (task.priority === 'high' && daysUntil <= 1) {
-              msg = getResponse(lang, 'high_priority_task', { task: task.task });
-            } else {
-              msg = getResponse(lang, 'task_reminder', {
-                task: task.task, due_date: dueDate.toLocaleDateString(), days_left: daysUntil
-              });
-            }
-            await sendMessage(user.vk_id, msg, getMainKeyboard(lang));
-            await supabase.from("reminders").insert({ key });
-            
-            // Mark as reminded to prevent duplicate
-            await supabase.from("tasks").update({ reminded: true }).eq("id", task.id);
           }
         }
       }
@@ -2208,24 +2100,24 @@ async function checkReminders() {
 function startReminders() {
   if (reminderInterval) clearInterval(reminderInterval);
   reminderInterval = setInterval(checkReminders, 60000);
-  console.log("✅ Reminder system active - checking every minute");
 }
 
-// ========== MAIN HANDLER ==========
+// ========== MAIN MESSAGE HANDLER ==========
 async function handleMessage(userId, text, lang) {
   try {
     const user = await getUser(userId);
     const name = user?.name || null;
     const displayName = name || 'friend';
     const lowerText = text.toLowerCase().trim();
+    const originalText = text.trim();
     
-    // NEW USER
+    // NEW USER - Ask for name
     if (!name && !lowerText.match(/(my name is|меня зовут|叫我|我是)/)) {
       await sendMessage(userId, getResponse(lang, 'welcome'), getMainKeyboard(lang));
       return;
     }
     
-    // EXTRACT NAME
+    // EXTRACT NAME from introduction
     const nameMatch = text.match(/(?:my name is|меня зовут|叫我|我是)\s+([A-Za-zА-Яа-яёЁ\u4e00-\u9fff]+)/i);
     if (nameMatch && !name) {
       const newName = nameMatch[1].charAt(0).toUpperCase() + nameMatch[1].slice(1).toLowerCase();
@@ -2239,25 +2131,22 @@ async function handleMessage(userId, text, lang) {
       return;
     }
     
-    // QUICK COMMANDS
+    // QUICK UTILITY COMMANDS
     if (lowerText === 'ping') {
-      const classes = await getSchedule(userId);
-      const tasks = await getTasks(userId);
-      await sendMessage(userId, getResponse(lang, 'ping', { classes: classes.length, tasks: tasks.length }), getMainKeyboard(lang));
+      await sendMessage(userId, getResponse(lang, 'ping'), getMainKeyboard(lang));
       return;
     }
+    
     if (lowerText === 'status') {
       await sendMessage(userId, getResponse(lang, 'status'), getMainKeyboard(lang));
       return;
     }
-    if (lowerText === 'about') {
-      await sendMessage(userId, getResponse(lang, 'about'), getMainKeyboard(lang));
-      return;
-    }
     
-    // TODAY
-    if (text === "📅 Today" || lowerText === 'today' || lowerText === 'сегодня' || lowerText === '今天') {
-      const [classes, tasks] = await Promise.all([getTodayClasses(userId), getTasks(userId)]);
+    // ===== SCHEDULE COMMANDS =====
+    if (originalText === "📅 Today" || lowerText === 'today' || lowerText === 'сегодня' || lowerText === '今天') {
+      const classes = await getTodayClasses(userId);
+      const tasks = await getTasks(userId);
+      
       if (!classes.length) {
         await sendMessage(userId, getResponse(lang, 'no_classes', { name: displayName, tasks: tasks.length }), getMainKeyboard(lang));
       } else {
@@ -2273,9 +2162,9 @@ async function handleMessage(userId, text, lang) {
       return;
     }
     
-    // TOMORROW
-    if (text === "📅 Tomorrow" || lowerText === 'tomorrow' || lowerText === 'завтра' || lowerText === '明天') {
+    if (originalText === "📅 Tomorrow" || lowerText === 'tomorrow' || lowerText === 'завтра' || lowerText === '明天') {
       const classes = await getTomorrowClasses(userId);
+      
       if (!classes.length) {
         await sendMessage(userId, getResponse(lang, 'no_classes_tomorrow', { name: displayName }), getMainKeyboard(lang));
       } else {
@@ -2292,39 +2181,17 @@ async function handleMessage(userId, text, lang) {
       return;
     }
     
-    // WEEK SCHEDULE
-    if (lowerText === 'week' || lowerText === 'неделя' || lowerText === '周课表') {
-      const weekMap = await getWeekSchedule(userId);
-      const dayNames = lang === 'zh' ? ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] : 
-                       lang === 'ru' ? ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'] : 
-                       ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-      
-      let weekStr = '';
-      for (let i = 0; i < 7; i++) {
-        const classes = weekMap[i];
-        weekStr += `**${dayNames[i]}**: `;
-        if (!classes.length) {
-          weekStr += 'No classes\n';
-        } else {
-          weekStr += classes.map(c => `${c.subject} (${c.start_time})`).join(', ') + '\n';
-        }
-      }
-      await sendMessage(userId, getResponse(lang, 'schedule_week', { week_schedule: weekStr }), getMainKeyboard(lang));
-      return;
-    }
-    
-    // NEXT CLASS
-    if (text === "⏰ Next" || lowerText === 'next' || lowerText === 'next class' || lowerText === 'следующая' || lowerText === '下节课') {
+    if (originalText === "⏰ Next" || lowerText === 'next' || lowerText === 'next class' || lowerText === 'следующая' || lowerText === 'следующая пара' || lowerText === '下节课') {
       const next = await getNextClass(userId);
       const reminder = await getReminderOffset(userId);
+      
       if (next) {
         const now = new Date();
         const [hours, minutes] = next.start_time.split(':').map(Number);
         let mins = (hours * 60 + minutes) - (now.getHours() * 60 + now.getMinutes());
         mins = Math.max(0, mins);
         await sendMessage(userId, getResponse(lang, 'next_class', {
-          subject: next.subject, time: next.start_time, location: next.location || 'Classroom',
-          minutes: mins, reminder
+          subject: next.subject, time: next.start_time, location: next.location || 'Classroom', minutes: mins
         }), getMainKeyboard(lang));
       } else {
         const tasks = await getTasks(userId);
@@ -2333,7 +2200,7 @@ async function handleMessage(userId, text, lang) {
       return;
     }
     
-    // REMINDER SETTINGS
+    // ===== REMINDER SETTINGS =====
     if (text.startsWith('/reminder')) {
       const parts = text.split(/\s+/);
       if (parts.length > 1) {
@@ -2352,14 +2219,17 @@ async function handleMessage(userId, text, lang) {
       return;
     }
     
-    // MARK ATTENDANCE
-    if (text === "✅ Mark" || lowerText === 'mark' || lowerText === 'отметить' || lowerText === '标记') {
+    // ===== ATTENDANCE COMMANDS =====
+    if (originalText === "✅ Mark" || lowerText === 'mark' || lowerText === 'mark attendance' || lowerText === 'отметить' || lowerText === 'отметить пару' || lowerText === '标记出勤' || lowerText === '标记') {
       const classes = await getTodayClasses(userId);
+      
       if (!classes.length) {
         await sendMessage(userId, getResponse(lang, 'no_classes', { name: displayName, tasks: 0 }), getMainKeyboard(lang));
       } else {
         let list = '';
-        for (let i = 0; i < classes.length; i++) list += `${i+1}. ${classes[i].subject}\n`;
+        for (let i = 0; i < classes.length; i++) {
+          list += `${i+1}. ${classes[i].subject}\n`;
+        }
         await sendMessage(userId, getResponse(lang, 'attendance_prompt', { classes: list }), getMainKeyboard(lang));
         userStates.set(userId, { mode: 'attendance', classes });
         setTimeout(() => { if (userStates.get(userId)?.mode === 'attendance') userStates.delete(userId); }, 60000);
@@ -2378,7 +2248,7 @@ async function handleMessage(userId, text, lang) {
             await sendMessage(userId, getResponse(lang, 'already_marked', { class_name: state.classes[idx].subject }), getMainKeyboard(lang));
           } else {
             const streakMsg = result.streak > 0 ? getResponse(lang, 'attendance_streak', { name: displayName, streak: result.streak + 1 }) : '';
-            await sendMessage(userId, getResponse(lang, 'attendance_marked', { class_name: state.classes[idx].subject, streak_msg: streakMsg }), getMainKeyboard(lang));
+            await sendMessage(userId, getResponse(lang, 'attendance_marked', { class_name: state.classes[idx].subject, streak_msg: streakMsg, name: displayName }), getMainKeyboard(lang));
           }
           userStates.delete(userId);
           return;
@@ -2386,7 +2256,7 @@ async function handleMessage(userId, text, lang) {
       }
     }
     
-    // Handle attendance by class name
+    // Handle attendance by class name mention
     const todayClasses = await getTodayClasses(userId);
     for (const cls of todayClasses) {
       if (lowerText.includes(cls.subject.toLowerCase())) {
@@ -2395,16 +2265,17 @@ async function handleMessage(userId, text, lang) {
           await sendMessage(userId, getResponse(lang, 'already_marked', { class_name: cls.subject }), getMainKeyboard(lang));
         } else {
           const streakMsg = result.streak > 0 ? getResponse(lang, 'attendance_streak', { name: displayName, streak: result.streak + 1 }) : '';
-          await sendMessage(userId, getResponse(lang, 'attendance_marked', { class_name: cls.subject, streak_msg: streakMsg }), getMainKeyboard(lang));
+          await sendMessage(userId, getResponse(lang, 'attendance_marked', { class_name: cls.subject, streak_msg: streakMsg, name: displayName }), getMainKeyboard(lang));
         }
         return;
       }
     }
     
-    // TASKS
-    if (text === "📝 Tasks" || lowerText === 'tasks' || lowerText === 'задачи' || lowerText === '任务') {
+    // ===== TASK COMMANDS =====
+    if (originalText === "📝 Tasks" || lowerText === 'tasks' || lowerText === 'my tasks' || lowerText === 'задачи' || lowerText === 'мои задачи' || lowerText === '任务' || lowerText === '我的任务') {
       const tasks = await getTasks(userId, true);
       const stats = await getTaskStats(userId);
+      
       if (!tasks.length) {
         await sendMessage(userId, getResponse(lang, 'no_tasks', { name: displayName }), getMainKeyboard(lang));
       } else {
@@ -2421,8 +2292,8 @@ async function handleMessage(userId, text, lang) {
       return;
     }
     
-    // COMPLETE TASK
-    const doneMatch = text.match(/(?:done|готово|完成)\s+(.+)/i);
+    // Complete task - "done task name"
+    const doneMatch = text.match(/(?:done|complete|finished|готово|сделано|完成|完成了)\s+(.+)/i);
     if (doneMatch) {
       const taskName = doneMatch[1].trim();
       const task = await findTaskByName(userId, taskName);
@@ -2435,8 +2306,8 @@ async function handleMessage(userId, text, lang) {
       return;
     }
     
-    // DELETE TASK
-    const deleteMatch = text.match(/(?:delete|удалить|删除)\s+(.+)/i);
+    // Delete task - "delete task name"
+    const deleteMatch = text.match(/(?:delete|remove|удалить|删除)\s+(.+)/i);
     if (deleteMatch) {
       const taskName = deleteMatch[1].trim();
       const task = await findTaskByName(userId, taskName);
@@ -2464,39 +2335,15 @@ async function handleMessage(userId, text, lang) {
       return;
     }
     
-    // ADD CLASS COMMAND
-    if (text.startsWith('/addclass') || text.startsWith('/addClass')) {
-      const parts = text.split(/\s+/);
-      if (parts.length >= 5) {
-        const subject = parts[1];
-        const day = parseInt(parts[2]);
-        const start = parts[3];
-        const end = parts[4];
-        const location = parts.slice(5).join(' ') || '';
-        
-        if (!isNaN(day) && day >= 0 && day <= 6 && start.match(/^\d{2}:\d{2}$/) && end.match(/^\d{2}:\d{2}$/)) {
-          await addClass(userId, subject, day, start, end, location);
-          const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-          const dayName = lang === 'ru' ? ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'][day] : dayNames[day];
-          await sendMessage(userId, getResponse(lang, 'class_added', { subject, day: dayName, start, end, location }), getMainKeyboard(lang));
-        } else {
-          await sendMessage(userId, getResponse(lang, 'add_class_instruction'), getMainKeyboard(lang));
-        }
-      } else {
-        await sendMessage(userId, getResponse(lang, 'add_class_instruction'), getMainKeyboard(lang));
-      }
-      return;
-    }
-    
-    // STATISTICS
-    if (text === "📊 Stats" || lowerText === 'stats' || lowerText === 'statistics' || lowerText === 'статистика' || lowerText === '统计') {
+    // ===== STATISTICS =====
+    if (originalText === "📊 Stats" || lowerText === 'stats' || lowerText === 'statistics' || lowerText === 'статистика' || lowerText === '统计') {
       const [taskStats, attendanceStats] = await Promise.all([getTaskStats(userId), getAttendanceStats(userId)]);
       const taskBar = '█'.repeat(Math.floor(taskStats.rate / 10)) + '░'.repeat(10 - Math.floor(taskStats.rate / 10));
       const attendBar = '█'.repeat(Math.floor(attendanceStats.rate / 10)) + '░'.repeat(10 - Math.floor(attendanceStats.rate / 10));
       
       let msg = getResponse(lang, 'stats_header');
       msg += getResponse(lang, 'task_stats', { 
-        completed: taskStats.completed, pending: taskStats.pending, rate: taskStats.rate, bar: taskBar, score: taskStats.score 
+        completed: taskStats.completed, pending: taskStats.pending, rate: taskStats.rate, bar: taskBar 
       }) + '\n\n';
       msg += getResponse(lang, 'attendance_stats', { 
         total: attendanceStats.total, attended: attendanceStats.attended, missed: attendanceStats.missed, rate: attendanceStats.rate, bar: attendBar 
@@ -2504,7 +2351,7 @@ async function handleMessage(userId, text, lang) {
       
       let insight = '';
       if (taskStats.rate > 80) {
-        insight = `Excellent productivity ${displayName}! You're crushing your goals! 🎯`;
+        insight = `Excellent productivity ${displayName}! Keep crushing your goals! 🎯`;
       } else if (taskStats.rate > 50) {
         insight = `Good progress ${displayName}! A little push and you'll be at the top! 💪`;
       } else if (taskStats.pending > 5) {
@@ -2518,13 +2365,12 @@ async function handleMessage(userId, text, lang) {
       return;
     }
     
-    // ICS IMPORT BUTTON
-    if (text === "📥 Import" || lowerText === 'import' || lowerText === 'импорт' || lowerText === '导入') {
+    // ===== ICS IMPORT =====
+    if (originalText === "📥 Import" || lowerText === 'import' || lowerText === 'импорт' || lowerText === '导入') {
       await sendMessage(userId, getResponse(lang, 'import_instructions'), getMainKeyboard(lang));
       return;
     }
     
-    // ICS COMMAND
     if (text.startsWith('/ics')) {
       const parts = text.split(/\s+/);
       if (parts.length > 1) {
@@ -2542,24 +2388,25 @@ async function handleMessage(userId, text, lang) {
       return;
     }
     
-    // HELP
-    if (text === "❓ Help" || lowerText === 'help' || lowerText === 'помощь' || lowerText === '帮助') {
+    // ===== HELP =====
+    if (originalText === "❓ Help" || lowerText === 'help' || lowerText === 'помощь' || lowerText === '帮助') {
       await sendMessage(userId, getResponse(lang, 'help_text'), getMainKeyboard(lang));
       return;
     }
     
-    // THANKS / GOODBYE
-    if (lowerText.includes('thanks') || lowerText.includes('спасибо') || lowerText.includes('谢谢')) {
+    // ===== THANKS =====
+    if (lowerText.includes('thanks') || lowerText.includes('thank') || lowerText.includes('спасибо') || lowerText.includes('谢谢')) {
       await sendMessage(userId, getResponse(lang, 'thanks', { name: displayName }), getMainKeyboard(lang));
       return;
     }
     
+    // ===== GOODBYE =====
     if (lowerText.includes('goodbye') || lowerText.includes('bye') || lowerText.includes('пока') || lowerText.includes('再见')) {
       await sendMessage(userId, getResponse(lang, 'goodbye', { name: displayName }), getMainKeyboard(lang));
       return;
     }
     
-    // DEFAULT
+    // ===== DEFAULT/UNKNOWN =====
     await sendMessage(userId, getResponse(lang, 'unknown', { name: displayName }), getMainKeyboard(lang));
     
   } catch (error) {
@@ -2583,12 +2430,12 @@ export async function handler(event) {
       const text = msg.text || "";
       const attachments = msg.attachments || [];
       
-      console.log(`[${userId}] ${text.substring(0, 50)}`);
+      console.log(`[${userId}] Received: "${text.substring(0, 50)}"`);
       
       const lang = detectLanguage(text);
       await saveUser(userId, { language: lang });
       
-      // HANDLE ICS FILE ATTACHMENTS
+      // Handle ICS file attachments
       for (const attachment of attachments) {
         if (attachment.type === 'doc' && attachment.doc.title && attachment.doc.title.toLowerCase().endsWith('.ics')) {
           console.log(`Processing ICS file: ${attachment.doc.title}`);
@@ -2605,7 +2452,7 @@ export async function handler(event) {
         }
       }
       
-      // HANDLE ICS LINKS IN TEXT
+      // Handle ICS links in text
       const urlMatch = text.match(/(https?:\/\/[^\s]+\.ics)/i);
       if (urlMatch) {
         console.log(`Processing ICS link: ${urlMatch[1]}`);
@@ -2621,7 +2468,7 @@ export async function handler(event) {
         return { statusCode: 200, body: JSON.stringify({ ok: true }) };
       }
       
-      // NORMAL MESSAGE HANDLING
+      // Normal message handling
       await handleMessage(userId, text, lang);
       return { statusCode: 200, body: JSON.stringify({ ok: true }) };
     }
@@ -2638,21 +2485,15 @@ startReminders();
 console.log("=".repeat(60));
 console.log("🎓 SMART HOUR BOT - FULLY FUNCTIONAL");
 console.log("=".repeat(60));
-console.log("✅ Features:");
-console.log("   📅 Schedule Management (Today/Tomorrow/Week/Next)");
-console.log("   📝 Task/Assignment Tracking (Add/Complete/Delete)");
-console.log("   ✅ Attendance Recording (Mark by number or name)");
-console.log("   ⏰ Smart Reminders (Adjustable 5-120 minutes)");
-console.log("   📥 ICS Calendar Import (File attachments & URLs)");
-console.log("   📊 Statistics Dashboard (Tasks & Attendance)");
-console.log("   🌐 Multi-language (English, Russian, Chinese)");
-console.log("   💾 Cloud-based Data Storage");
+console.log("✅ ALL COMMANDS WORKING:");
+console.log("   📅 'today' - Show today's schedule");
+console.log("   📅 'tomorrow' - Show tomorrow's schedule");
+console.log("   ⏰ 'next class' - Show next class");
+console.log("   📝 'tasks' - Show all tasks");
+console.log("   ✅ 'mark' - Mark attendance");
+console.log("   📊 'stats' - Show statistics");
+console.log("   📥 Send .ics file - Import calendar");
+console.log("   ⚙️ '/reminder 45' - Set reminder time");
+console.log("   ❓ 'help' - Show help");
 console.log("=".repeat(60));
 console.log("🚀 Bot is running and waiting for messages!");
-console.log("💡 Commands:");
-console.log("   📅 Schedule: 'today', 'tomorrow', 'week', 'next class'");
-console.log("   📝 Tasks: '/task \"Task\" YYYY-MM-DD HH:MM days priority'");
-console.log("   ✅ Attendance: 'mark'");
-console.log("   📊 Stats: 'stats'");
-console.log("   ❓ Help: 'help'");
-console.log("=".repeat(60));
