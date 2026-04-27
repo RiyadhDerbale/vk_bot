@@ -1497,10 +1497,8 @@ export async function handler(event) {
 }*/
 
 
-
 import { createClient } from "@supabase/supabase-js";
 import fetch from "node-fetch";
-import { WebSocket } from "ws";
 
 // Initialize Supabase
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -1510,10 +1508,10 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const VK_TOKEN = process.env.VK_TOKEN;
 const VK_API_VERSION = "5.131";
 
-// ========== INTELLIGENT CACHING ==========
+// ========== CACHING SYSTEM ==========
 const cache = new Map();
-const userContexts = new Map(); // Store conversation context per user
-const userStates = new Map(); // Store user state (waiting for input)
+const userStates = new Map();
+const userReminderSettings = new Map();
 
 const CACHE_TTL = 300000; // 5 minutes
 
@@ -1531,410 +1529,163 @@ function setCached(key, data) {
 }
 
 // ========== ENHANCED LANGUAGE DETECTION ==========
-const languagePatterns = {
-  en: /^(hello|hi|hey|what|how|when|where|my|schedule|task|help|thanks|thank|good|great|yes|no|please|sorry|show|tell|create|add|delete|edit|update|mark|track|statistics|progress|attendance|study|remind|reminder|today|tomorrow|next|done|complete|finish)$/i,
-  ru: /^(привет|здравствуй|что|как|когда|где|мой|мое|моя|расписание|задача|помощь|спасибо|хорошо|отлично|да|нет|пожалуйста|извини|покажи|скажи|создай|добавь|удали|редактируй|отметь|отслеживай|статистика|прогресс|посещаемость|учеба|напомни|напоминание|сегодня|завтра|следующий|готово|сделано|завершено)$/i,
-  es: /^(hola|qué|cómo|cuándo|dónde|mi|horario|tarea|ayuda|gracias|bueno|genial|sí|no|por favor|lo siento|muestra|dime|crea|agrega|elimina|edita|marca|estadísticas|progreso|asistencia|estudio|recordar|recordatorio|hoy|mañana|próximo|hecho|completo|terminado)$/i,
-  de: /^(hallo|was|wie|wann|wo|mein|stundenplan|aufgabe|hilfe|danke|gut|großartig|ja|nein|bitte|entschuldigung|zeig|sag|erstellen|hinzufügen|löschen|bearbeiten|markieren|statistik|fortschritt|anwesenheit|lernen|erinnern|erinnerung|heute|morgen|nächste|fertig|abgeschlossen|beenden)$/i,
-  fr: /^(bonjour|salut|quoi|comment|quand|où|mon|emploi|tâche|aide|merci|bien|génial|oui|non|s'il vous plaît|désolé|montre|dis|créer|ajouter|supprimer|modifier|marquer|statistiques|progrès|présence|étude|rappeler|rappel|aujourd'hui|demain|prochain|fini|terminé|complété)$/i
-};
-
 function detectLanguage(text) {
   if (!text) return 'en';
   
-  // Check for Cyrillic
+  // Priority: Check for Cyrillic (Russian)
   if (/[а-яА-ЯёЁ]/.test(text)) return 'ru';
   
-  // Check other languages
-  for (const [lang, pattern] of Object.entries(languagePatterns)) {
+  // Check for other languages
+  const langPatterns = {
+    es: /[áéíóúñ¿¡]/i,
+    de: /[äöüß]/i,
+    fr: /[éèêëàâæôœûùçîï]/i,
+    it: /[àèéìíîòóùú]/i
+  };
+  
+  for (const [lang, pattern] of Object.entries(langPatterns)) {
     if (pattern.test(text)) return lang;
   }
   
   return 'en';
 }
 
-// ========== ENHANCED MULTILINGUAL RESPONSES ==========
+// ========== COMPLETE MULTILINGUAL RESPONSES ==========
 const RESPONSES = {
   en: {
-    // Greetings & Intro
-    greeting: "👋 Hello {name}! I'm your intelligent academic assistant. How can I help you today?",
-    morning_greeting: "🌅 Good morning {name}! Ready for a productive day?",
-    afternoon_greeting: "☀️ Good afternoon {name}! Hope you're having a great day!",
-    evening_greeting: "🌙 Good evening {name}! Winding down or studying?",
-    ask_name: "👋 Hi there! I'm your personal AI assistant. What's your name?",
-    got_name: "🎉 Awesome to meet you {name}! I'm here to help you succeed. What would you like to do?",
+    // Greetings & Onboarding
+    ask_name: "👋 Hello! I'm your personal assistant. What's your name?",
+    got_name: "🎉 Nice to meet you {name}! I'll help you manage your schedule, tasks, and attendance.\n\nWhat would you like to do?",
+    greeting: "👋 Welcome back {name}! Ready to stay organized?",
+    morning: "🌅 Good morning {name}! Ready for a productive day?",
+    afternoon: "☀️ Good afternoon {name}! How's your day going?",
+    evening: "🌙 Good evening {name}! Wrapping up your day?",
     
     // Schedule
-    schedule_today: "📅 **Today's Schedule** - {date}\n\n{classes}💡 *Click '✅ Mark' after each class to track attendance!*",
-    schedule_tomorrow: "📅 **Tomorrow's Schedule** - {date}\n\n{classes}",
-    schedule_week: "📅 **Full Week Schedule**\n\n{week_schedule}",
-    no_classes: "🎉 You have no classes today {name}! Perfect day for self-study or catching up on tasks!",
+    schedule_today: "📅 **Today's Schedule** ({date})\n\n{classes}💡 *Reply with class number to mark attendance*",
+    schedule_tomorrow: "📅 **Tomorrow's Schedule** ({date})\n\n{classes}",
+    no_classes: "🎉 No classes today {name}! Great time to catch up on tasks!",
     no_classes_tomorrow: "🎉 No classes tomorrow {name}! Enjoy your break!",
-    class_reminder: "⏰ **Class in {minutes} minutes!**\n📚 {subject}\n📍 {location}\n🕐 {start} - {end}\n\nReady to learn? 📖",
     
-    // Next Class
-    next_class: "⏰ {name}, your next class is **{subject}** at {time}\n📍 {location}\n⏱️ In about {minutes} minutes!\n\n*Set a reminder? Just ask!*",
-    next_class_tomorrow: "📌 Your next class is tomorrow: **{subject}** at {time}\n📍 {location}",
-    no_next_class: "🎉 You're all done with classes for today {name}! Time to relax or catch up on tasks!",
+    // Next Class & Reminders
+    next_class: "⏰ **Next Class:** {subject}\n🕐 {time}\n📍 {location}\n⏱️ In {minutes} minutes\n\n*I'll remind you {reminder_minutes} minutes before!*",
+    no_next_class: "🎉 No more classes today {name}! Time to relax or work on tasks!",
+    class_reminder: "⏰ **CLASS REMINDER!**\n\n📚 {subject}\n🕐 {time}\n📍 {location}\n⏱️ Starts in {minutes} minutes!\n\n✅ Reply 'attend {subject}' to mark attendance after class!",
+    reminder_updated: "✅ Reminder time updated! I'll remind you {minutes} minutes before each class.",
+    current_reminder: "🔔 Current reminder setting: {minutes} minutes before each class.\n\nUse /reminder <minutes> to change (5-120 minutes)",
     
     // Tasks
-    tasks_header: "📋 **Your Tasks** ({pending} pending, {completed} completed)\n\n{tasks}\n💬 *Say 'Done [task]' or click ✅ when complete!*",
-    no_tasks: "✅ Amazing! No pending tasks {name}. Check 'Statistics' to see your achievement! 🎉",
-    task_added: "✅ Added '{task}' to your list!\n📅 Due: {due_date}\n🔔 I'll remind you {days} day(s) before.\n\n*Want to add another? Just say the word!*",
-    task_completed: "🎉 Congratulations {name}! You completed '{task}'!\n\n📊 Check your improved statistics!",
-    task_deleted: "🗑️ Removed '{task}' from your list.",
-    task_reminder: "⏰ **Task Reminder!**\n📝 {task}\n📅 Due: {due_date}\n⚠️ {days_left} day(s) left!",
-    high_priority_warning: "🔴 **HIGH PRIORITY!** {task} is due tomorrow!",
+    tasks_header: "📋 **Your Tasks** ({pending} pending, {completed} completed)\n\n{tasks}💬 *Reply 'done [task name]' or 'complete [task name]' to mark as done*\n📊 *Say 'stats' to see your progress*",
+    no_tasks: "✅ Amazing {name}! No pending tasks! 🎉\n\n📊 *Say 'stats' to see your achievements*",
+    task_added: "✅ Added: **{task}**\n📅 Due: {due_date}\n🔔 Reminder: {days} day(s) before\n⚡ Priority: {priority}\n\n*Say 'my tasks' to see all tasks*",
+    task_completed: "🎉 Fantastic {name}! Completed: **{task}**\n\n📊 Your productivity score increased! Say 'stats' to see!",
+    task_deleted: "🗑️ Removed: **{task}** from your list",
+    task_not_found: "❌ Couldn't find task matching '{task}'\n\n💬 Try: 'done {exact task name}' or check 'my tasks' for the exact name",
+    task_format_error: "❌ Invalid format!\n\n📝 Use: /task \"Task name\" YYYY-MM-DD HH:MM days [priority]\n\nExample: /task \"Submit homework\" 2025-12-20 23:59 3 high",
     
     // Attendance
-    attendance_prompt: "📚 **Mark Attendance**\n\nWhich class did you attend today {name}?\n\n{classes}\n\n*Reply with number or class name!*",
-    attendance_marked: "✅ Got it! Marked '{class_name}' as attended {name}!\n📈 Attendance rate updated!\n\n*Need to mark another? Just say 'Mark attendance' again!*",
+    attendance_prompt: "📚 **Mark Attendance**\n\nToday's classes:\n{classes}\n\nReply with the number (1-{count}) or class name:",
+    attendance_marked: "✅ Marked **{class_name}** as attended {name}!\n📈 Attendance updated!\n\n{streak_message}",
     attendance_streak: "🔥 You've attended {streak} classes in a row! Keep it up!",
-    no_classes_attendance: "📭 No classes today {name}! Catch up on tasks or enjoy your free time!",
-    
-    // Study Tracking
-    study_logged: "📖 Great job {name}! Logged {duration} minutes studying {subject}.\n📊 Check 'Statistics' to see your progress!\n\n*Keep up the great work!*",
-    study_prompt: "📚 How long did you study today {name}? Tell me like:\n'Study 120 minutes Math'\n'Studied 45 minutes Physics'",
+    already_marked: "ℹ️ You've already marked attendance for {class_name} today!",
+    no_classes_attendance: "📭 No classes today {name}! Check your tasks instead?",
     
     // Statistics
-    stats_header: "📊 **YOUR PERFORMANCE DASHBOARD** 📊\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
-    task_mastery: "📝 **TASK MASTERY**\n• ✅ Completed: {completed}\n• ⏳ Pending: {pending}\n• 🔴 High Priority Done: {high}\n• 🎯 Productivity Score: {score}%\n   [{bar}]",
-    attendance_section: "📚 **CLASS ATTENDANCE**\n• 📖 Total Classes: {total}\n• ✅ Attended: {attended}\n• ❌ Missed: {missed}\n• 📈 Attendance Rate: {rate}%\n   [{bar}]",
-    study_section: "⏱️ **STUDY TIME**\n• 📅 Today: {today} min\n• 📆 This Week: {week} min\n• 🏆 Total: {total_study} min\n• 💪 Daily Avg: {avg} min",
-    streak_section: "🔥 **STREAKS**\n• Study Streak: {study_streak} days\n• Task Streak: {task_streak} days\n• Perfect Attendance: {perfect_days} days",
-    motivation: "💡 **AI INSIGHT**\n{message}",
+    stats_header: "📊 **PERFORMANCE DASHBOARD** 📊\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
+    task_stats: "📝 **TASKS**\n• ✅ Completed: {completed}\n• ⏳ Pending: {pending}\n• 🎯 Completion Rate: {rate}%\n   [{bar}]",
+    attendance_stats: "📚 **ATTENDANCE**\n• 📖 Total Classes: {total}\n• ✅ Attended: {attended}\n• ❌ Missed: {missed}\n• 📈 Rate: {rate}%\n   [{bar}]",
+    study_stats: "⏱️ **STUDY TIME**\n• 📅 Today: {today} min\n• 📆 This Week: {week} min\n• 🏆 Total: {total} min\n• 💪 Daily Avg: {avg} min",
+    motivation: "💡 **INSIGHT**\n{message}",
     
-    // Smart Responses
-    smart_suggestions: "💡 **Smart Suggestions:**\n• You have {pending_tasks} pending tasks\n• {next_class_info}\n• Attendance: {attendance_rate}%\n\n*Want me to help with anything?*",
-    productivity_tip: "📈 **Productivity Tip:** {tip}",
-    encouragement: "🌟 {name}, you're doing great! {achievement}",
-    
-    // Natural Language Understanding
-    what_can_i_ask: "I understand natural language! Try asking:\n• 'What's my schedule like this week?'\n• 'Add a math test on Friday'\n• 'I studied physics for 2 hours'\n• 'Mark my programming class'\n• 'How am I doing this month?'\n• 'Remind me to submit assignment tomorrow'",
-    
-    // Import
-    import_instructions: "📥 **Import Schedule**\n\nSend me:\n1️⃣ An ICS file attachment\n2️⃣ A link to an ICS calendar\n3️⃣ Or use: /ics [url]\n\nI'll automatically add all your classes! ✨",
-    import_success: "🎉 Successfully imported {count} classes {name}!\n\n📅 Your schedule is ready!\n✅ I'll remind you before each class\n📊 Check your statistics to track progress!",
+    // ICS Import
+    import_instructions: "📥 **Import Schedule**\n\nSend me:\n• An ICS file attachment\n• A link to an ICS calendar\n• Or use: /ics <url>\n\nI'll automatically add all your classes with reminders!",
     import_progress: "⏳ Processing your calendar... This may take a moment.",
-    file_import_success: "📁 File imported! Added {count} classes to your schedule.",
+    import_success: "🎉 Successfully imported **{count}** classes {name}!\n\n✅ Reminders set {reminder_minutes} minutes before each class\n📅 Say 'today' to see your schedule\n📊 Say 'stats' to track progress!",
+    import_fail: "❌ Failed to import calendar. Make sure it's a valid ICS file.\n\n💡 Try: Send the .ics file directly or check the link format.",
+    file_import_success: "📁 Imported {count} classes from your file!",
     
-    // Smart Commands
-    help_text: "🤖 **What I Can Do**\n\n📅 **Schedule**\n• 'What's today?' or 'My classes today'\n• 'What's tomorrow?' or 'Classes tomorrow'\n• 'Show full week' or 'Weekly schedule'\n• Send ICS file to import\n\n✅ **Attendance**\n• 'Mark attendance' or 'I attended class'\n• 'Track my math class'\n\n📝 **Tasks**\n• 'My tasks' or 'What's pending?'\n• '/task \"Task name\" 2025-12-20 23:59 7 high'\n• 'Done homework' or 'Complete assignment'\n\n📊 **Study**\n• 'I studied X minutes for Y'\n• 'Study statistics' or 'My progress'\n\n📈 **Analytics**\n• 'Statistics' or 'Show my stats'\n• 'How am I doing?'\n• 'Weekly report'\n\n⚡ **Smart Features**\n• Natural language understanding\n• Personalized suggestions\n• Streak tracking\n• Productivity insights\n\n*Just type naturally - I'll understand!* 🎯",
+    // Natural Language Commands
+    help_text: "🤖 **What I Can Do**\n\n📅 **SCHEDULE**\n• 'today' or 'what's today' - Today's classes\n• 'tomorrow' - Tomorrow's classes\n• 'next class' - Next upcoming class\n• Send ICS file - Import timetable\n\n✅ **ATTENDANCE**\n• 'mark attendance' - Mark today's classes\n• 'attend [class name]' - Quick mark\n\n📝 **TASKS**\n• 'my tasks' - See pending tasks\n• '/task \"Task\" 2025-12-20 23:59 3 high'\n• 'done [task name]' - Complete task\n\n⚙️ **REMINDERS**\n• '/reminder 45' - Set class reminder (5-120 min)\n• 'reminder settings' - Check current\n\n📊 **STATISTICS**\n• 'stats' or 'statistics' - Full report\n\n📥 **IMPORT**\n• Attach .ics file\n• /ics [calendar-url]\n\n💬 **Just type naturally - I understand!**",
+    
+    // Settings
+    reminder_settings: "⚙️ **Reminder Settings**\n\nCurrent: {minutes} minutes before class\nRange: 5 - 120 minutes\n\nUse /reminder <minutes> to change\nExample: /reminder 45",
     
     // Dynamic Responses
-    time_response: "🕐 It's {time} {name}. You have {classes_today} today.\n\n{next_class_info}",
-    joke: "😂 Here's a laugh for you:\n\n{joke}",
-    quote: "📖 *{quote}*\n— {author}",
+    time_status: "🕐 {time}\n📅 {date}\n\n{next_class_info}\n📝 Pending tasks: {pending_tasks}\n📊 Attendance: {attendance}%",
+    weekly_report: "📊 **Weekly Report**\n\n📚 Classes: {attended}/{total} ({rate}%)\n📝 Tasks: {tasks_done}/{total_tasks}\n⏱️ Study: {study_hours}h\n\n{encouragement}",
     
     // Errors & Fallbacks
-    unknown: "🤔 I understand you're asking about '{topic}'.\n\nWould you like me to:\n• Check your schedule?\n• Show your tasks?\n• Display statistics?\n• Help with attendance?\n\n*Or just tell me what you need!*",
-    error: "❌ Sorry {name}, I encountered an issue. Could you rephrase that?",
-    not_found: "🔍 I couldn't find '{query}' in your {category}. Try checking your {category} list?",
+    unknown: "🤔 I understand you're asking about something.\n\nTry one of these:\n• 'today' - See schedule\n• 'my tasks' - See pending tasks\n• 'stats' - View progress\n• 'help' - All commands",
+    error: "❌ Sorry {name}, something went wrong. Please try again or say 'help'",
     
-    // Reminders
-    reminder_set: "⏰ I'll remind you about '{reminder}' on {date}!",
-    reminder_deleted: "🗑️ Removed your reminder.",
-    no_reminders: "No active reminders {name}. Need to set one?",
-    
-    // Reports
-    weekly_report: "📊 **Weekly Report**\n\n📅 Classes: {classes_attended}/{total_classes}\n📝 Tasks: {tasks_completed}/{total_tasks}\n📖 Study: {study_hours} hours\n📈 Improvement: {improvement}%\n\n{encouragement}",
-    
-    // ICS File specific
-    ics_support: "📁 I support ICS files! Just attach your calendar file or send a link. I'll extract all your classes automatically!"
+    // Responses
+    thanks: "😊 You're welcome {name}! Anything else I can help with?",
+    joke: "😂 Here's a joke for you {name}:\n\n{joke}",
+    quote: "📖 \"{quote}\"\n— {author}"
   },
   
   ru: {
-    greeting: "👋 Привет {name}! Я твой умный учебный помощник. Чем могу помочь?",
-    morning_greeting: "🌅 Доброе утро {name}! Готов к продуктивному дню?",
-    afternoon_greeting: "☀️ Добрый день {name}! Надеюсь, день проходит отлично!",
-    evening_greeting: "🌙 Добрый вечер {name}! Занимаешься или отдыхаешь?",
-    ask_name: "👋 Привет! Я твой персональный AI-помощник. Как тебя зовут?",
-    got_name: "🎉 Отлично, {name}! Я помогу тебе успевать всё. Что хочешь сделать?",
+    ask_name: "👋 Привет! Я твой персональный помощник. Как тебя зовут?",
+    got_name: "🎉 Приятно познакомиться {name}! Я помогу тебе с расписанием, задачами и посещаемостью.\n\nЧто хочешь сделать?",
+    greeting: "👋 С возвращением {name}! Готов к продуктивному дню?",
+    morning: "🌅 Доброе утро {name}! Готов к продуктивному дню?",
+    afternoon: "☀️ Добрый день {name}! Как проходит твой день?",
+    evening: "🌙 Добрый вечер {name}! Завершаешь день?",
     
-    schedule_today: "📅 **Расписание на сегодня** - {date}\n\n{classes}💡 *Нажми '✅ Отметить' после каждой пары!*",
-    schedule_tomorrow: "📅 **Расписание на завтра** - {date}\n\n{classes}",
-    schedule_week: "📅 **Расписание на неделю**\n\n{week_schedule}",
-    no_classes: "🎉 Сегодня нет пар {name}! Отличный день для самоподготовки!",
+    schedule_today: "📅 **Расписание на сегодня** ({date})\n\n{classes}💡 *Ответь номером пары чтобы отметить посещение*",
+    schedule_tomorrow: "📅 **Расписание на завтра** ({date})\n\n{classes}",
+    no_classes: "🎉 Сегодня нет пар {name}! Отличное время для задач!",
     no_classes_tomorrow: "🎉 Завтра нет пар {name}! Отдыхай!",
     
-    next_class: "⏰ {name}, следующая пара: **{subject}** в {time}\n📍 {location}\n⏱️ Через {minutes} минут!",
-    no_next_class: "🎉 На сегодня пар больше нет {name}! Время отдыхать!",
+    next_class: "⏰ **Следующая пара:** {subject}\n🕐 {time}\n📍 {location}\n⏱️ Через {minutes} минут\n\n*Напомню за {reminder_minutes} минут!*",
+    no_next_class: "🎉 На сегодня пар больше нет {name}! Время для задач или отдыха!",
+    class_reminder: "⏰ **НАПОМИНАНИЕ О ПАРЕ!**\n\n📚 {subject}\n🕐 {time}\n📍 {location}\n⏱️ Начинается через {minutes} минут!\n\n✅ Ответь 'отметить {subject}' чтобы отметить посещение!",
+    reminder_updated: "✅ Напоминание обновлено! Буду напоминать за {minutes} минут до пары.",
+    current_reminder: "🔔 Текущая настройка: {minutes} минут до пары.\n\nИспользуй /reminder <минуты> чтобы изменить (5-120 минут)",
     
-    tasks_header: "📋 **Твои задачи** ({pending} активных, {completed} выполнено)\n\n{tasks}\n💬 *Скажи 'Готово [задача]' когда сделаешь!*",
-    no_tasks: "✅ Отлично! Нет активных задач {name}. Проверь статистику! 🎉",
-    task_added: "✅ Добавил '{task}'!\n📅 Дедлайн: {due_date}\n🔔 Напомню за {days} дн.",
-    task_completed: "🎉 Молодец {name}! Ты выполнил '{task}'!\n\n📊 Проверь обновлённую статистику!",
-    task_deleted: "🗑️ Удалил '{task}' из списка.",
+    tasks_header: "📋 **Твои задачи** ({pending} активных, {completed} выполнено)\n\n{tasks}💬 *Ответь 'готово [задача]' чтобы отметить выполненной*\n📊 *Скажи 'статистика' чтобы увидеть прогресс*",
+    no_tasks: "✅ Отлично {name}! Нет активных задач! 🎉\n\n📊 *Скажи 'статистика' чтобы увидеть достижения*",
+    task_added: "✅ Добавлено: **{task}**\n📅 Дедлайн: {due_date}\n🔔 Напомню за {days} дн.\n⚡ Приоритет: {priority}\n\n*Скажи 'мои задачи' чтобы увидеть список*",
+    task_completed: "🎉 Молодец {name}! Выполнено: **{task}**\n\n📊 Твоя продуктивность выросла! Скажи 'статистика'!",
+    task_deleted: "🗑️ Удалено: **{task}** из списка",
+    task_not_found: "❌ Не могу найти задачу '{task}'\n\n💬 Попробуй: 'готово {точное название}' или посмотри 'мои задачи'",
+    task_format_error: "❌ Неверный формат!\n\n📝 Используй: /task \"Название\" ГГГГ-ММ-ДД ЧЧ:ММ дни [приоритет]\n\nПример: /task \"Сдать дз\" 2025-12-20 23:59 3 high",
     
-    attendance_prompt: "📚 **Отметить посещение**\n\nКакую пару ты посетил {name}?\n\n{classes}\n\n*Ответь номером или названием!*",
-    attendance_marked: "✅ Отметил '{class_name}' как посещённое {name}!\n📊 Посещаемость обновлена!",
-    no_classes_attendance: "📭 Сегодня нет пар {name}!",
+    attendance_prompt: "📚 **Отметить посещение**\n\nПары сегодня:\n{classes}\n\nОтветь номером (1-{count}) или названием пары:",
+    attendance_marked: "✅ Отмечено **{class_name}** как посещённое {name}!\n📈 Посещаемость обновлена!\n\n{streak_message}",
+    attendance_streak: "🔥 Ты посетил {streak} пар(ы) подряд! Так держать!",
+    already_marked: "ℹ️ Ты уже отметил {class_name} сегодня!",
+    no_classes_attendance: "📭 Сегодня нет пар {name}! Проверь задачи?",
     
-    study_logged: "📖 Отлично {name}! Записал {duration} минут учёбы по {subject}.\n📊 Проверь статистику!",
+    stats_header: "📊 **ПАНЕЛЬ ПРОГРЕССА** 📊\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
+    task_stats: "📝 **ЗАДАЧИ**\n• ✅ Выполнено: {completed}\n• ⏳ Ожидает: {pending}\n• 🎯 Процент: {rate}%\n   [{bar}]",
+    attendance_stats: "📚 **ПОСЕЩАЕМОСТЬ**\n• 📖 Всего пар: {total}\n• ✅ Посещено: {attended}\n• ❌ Пропущено: {missed}\n• 📈 Процент: {rate}%\n   [{bar}]",
+    study_stats: "⏱️ **ВРЕМЯ УЧЁБЫ**\n• 📅 Сегодня: {today} мин\n• 📆 На неделе: {week} мин\n• 🏆 Всего: {total} мин\n• 💪 В день: {avg} мин",
+    motivation: "💡 **ИНСАЙТ**\n{message}",
     
-    stats_header: "📊 **ТВОЯ СТАТИСТИКА УСПЕВАЕМОСТИ** 📊\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
-    task_mastery: "📝 **ЗАДАЧИ**\n• ✅ Выполнено: {completed}\n• ⏳ Ожидает: {pending}\n• 🔴 Высокий приоритет: {high}\n• 🎯 Продуктивность: {score}%\n   [{bar}]",
-    attendance_section: "📚 **ПОСЕЩАЕМОСТЬ**\n• 📖 Всего пар: {total}\n• ✅ Посещено: {attended}\n• ❌ Пропущено: {missed}\n• 📈 Процент: {rate}%\n   [{bar}]",
-    study_section: "⏱️ **ВРЕМЯ УЧЁБЫ**\n• 📅 Сегодня: {today} мин\n• 📆 На неделе: {week} мин\n• 🏆 Всего: {total_study} мин\n• 💪 В среднем: {avg} мин",
+    import_instructions: "📥 **Импорт расписания**\n\nОтправь мне:\n• ICS файл\n• Ссылку на ICS календарь\n• Или используй: /ics <ссылка>\n\nЯ автоматически добавлю все пары с напоминаниями!",
+    import_progress: "⏳ Обрабатываю календарь... Подожди немного.",
+    import_success: "🎉 Успешно импортировано **{count}** пар(ы) {name}!\n\n✅ Напоминания за {reminder_minutes} минут до каждой пары\n📅 Скажи 'сегодня' чтобы увидеть расписание\n📊 Скажи 'статистика' чтобы отслеживать прогресс!",
+    import_fail: "❌ Не удалось импортировать календарь. Убедись что это правильный ICS файл.\n\n💡 Попробуй: Отправить .ics файл напрямую или проверь ссылку.",
+    file_import_success: "📁 Импортировано {count} пар(ы) из твоего файла!",
     
-    import_success: "🎉 Успешно импортировано {count} пар(ы) {name}!\n\n📅 Расписание готово!\n✅ Буду напоминать перед каждой парой!",
-    import_progress: "⏳ Обрабатываю календарь... Подождите.",
+    help_text: "🤖 **Что я умею**\n\n📅 **РАСПИСАНИЕ**\n• 'сегодня' - Пары на сегодня\n• 'завтра' - Пары на завтра\n• 'следующая пара' - Ближайшая пара\n• Отправь ICS файл - Импорт\n\n✅ **ПОСЕЩАЕМОСТЬ**\n• 'отметить пару' - Отметить пары\n• 'отметить [название]' - Быстрая отметка\n\n📝 **ЗАДАЧИ**\n• 'мои задачи' - Список задач\n• '/task \"Задача\" 2025-12-20 23:59 3 high'\n• 'готово [задача]' - Выполнить\n\n⚙️ **НАПОМИНАНИЯ**\n• '/reminder 45' - Установить (5-120 мин)\n• 'настройки напоминаний'\n\n📊 **СТАТИСТИКА**\n• 'статистика' - Полный отчёт\n\n📥 **ИМПОРТ**\n• Прикрепи .ics файл\n• /ics [ссылка]\n\n💬 **Говори естественно - я понимаю!**",
     
-    help_text: "🤖 **Что я умею**\n\n📅 **Расписание**\n• 'Что сегодня?'\n• 'Что завтра?'\n• 'Покажи неделю'\n• Прикрепи ICS файл\n\n✅ **Посещаемость**\n• 'Отметить пару'\n\n📝 **Задачи**\n• 'Мои задачи'\n• '/task \"Задача\" 2025-12-20 23:59 7'\n• 'Готово задача'\n\n📊 **Учёба**\n• 'Я учился X минут'\n• 'Статистика'\n\n*Говори естественно - я пойму!* 🎯",
+    reminder_settings: "⚙️ **Настройки напоминаний**\n\nСейчас: {minutes} минут до пары\nДиапазон: 5 - 120 минут\n\nИспользуй /reminder <минуты> чтобы изменить\nПример: /reminder 45",
     
-    unknown: "🤔 Ты спрашиваешь о '{topic}'.\n\nХочешь:\n• Посмотреть расписание?\n• Показать задачи?\n• Увидеть статистику?\n• Отметить посещение?\n\n*Просто скажи, что нужно!*",
+    time_status: "🕐 {time}\n📅 {date}\n\n{next_class_info}\n📝 Активных задач: {pending_tasks}\n📊 Посещаемость: {attendance}%",
+    weekly_report: "📊 **Отчёт за неделю**\n\n📚 Пары: {attended}/{total} ({rate}%)\n📝 Задачи: {tasks_done}/{total_tasks}\n⏱️ Учёба: {study_hours}ч\n\n{encouragement}",
     
-    ics_support: "📁 Я поддерживаю ICS файлы! Просто прикрепи файл календаря или отправь ссылку."
+    unknown: "🤔 Я вижу ты спрашиваешь о чём-то.\n\nПопробуй:\n• 'сегодня' - Расписание\n• 'мои задачи' - Список задач\n• 'статистика' - Прогресс\n• 'помощь' - Все команды",
+    error: "❌ Извини {name}, что-то пошло не так. Попробуй ещё раз или скажи 'помощь'",
+    
+    thanks: "😊 Пожалуйста {name}! Ещё чем-то помочь?",
+    joke: "😂 Шутка для тебя {name}:\n\n{joke}",
+    quote: "📖 \"{quote}\"\n— {author}"
   }
 };
 
-// ========== ENHANCED DATABASE SETUP ==========
-async function initDatabase() {
-  // Create tables if they don't exist
-  const tables = [
-    `CREATE TABLE IF NOT EXISTS users (
-      vk_id BIGINT PRIMARY KEY,
-      name TEXT,
-      language TEXT DEFAULT 'en',
-      reminder_offset INTEGER DEFAULT 75,
-      study_streak INTEGER DEFAULT 0,
-      task_streak INTEGER DEFAULT 0,
-      perfect_attendance_days INTEGER DEFAULT 0,
-      last_active DATE,
-      join_date TIMESTAMP DEFAULT NOW()
-    )`,
-    
-    `CREATE TABLE IF NOT EXISTS schedule (
-      id SERIAL PRIMARY KEY,
-      user_id BIGINT,
-      subject TEXT,
-      day INTEGER,
-      start_time TEXT,
-      end_time TEXT,
-      location TEXT DEFAULT '',
-      teacher TEXT DEFAULT '',
-      room TEXT DEFAULT '',
-      UNIQUE(user_id, subject, day, start_time)
-    )`,
-    
-    `CREATE TABLE IF NOT EXISTS class_attendance (
-      id SERIAL PRIMARY KEY,
-      user_id BIGINT,
-      class_name TEXT,
-      date DATE,
-      attended INTEGER DEFAULT 0,
-      missed INTEGER DEFAULT 0,
-      UNIQUE(user_id, class_name, date)
-    )`,
-    
-    `CREATE TABLE IF NOT EXISTS tasks (
-      id SERIAL PRIMARY KEY,
-      user_id BIGINT,
-      task TEXT,
-      due_date TIMESTAMP,
-      remind_days INTEGER,
-      priority TEXT DEFAULT 'normal',
-      category TEXT DEFAULT 'general',
-      done INTEGER DEFAULT 0,
-      completed_date TIMESTAMP,
-      created_date TIMESTAMP DEFAULT NOW()
-    )`,
-    
-    `CREATE TABLE IF NOT EXISTS study_sessions (
-      id SERIAL PRIMARY KEY,
-      user_id BIGINT,
-      subject TEXT,
-      duration INTEGER,
-      date DATE
-    )`,
-    
-    `CREATE TABLE IF NOT EXISTS daily_stats (
-      id SERIAL PRIMARY KEY,
-      user_id BIGINT,
-      date DATE,
-      tasks_completed INTEGER DEFAULT 0,
-      classes_attended INTEGER DEFAULT 0,
-      study_minutes INTEGER DEFAULT 0
-    )`,
-    
-    `CREATE TABLE IF NOT EXISTS reminders (
-      key TEXT PRIMARY KEY,
-      user_id BIGINT,
-      reminder_text TEXT,
-      reminder_date TIMESTAMP,
-      sent INTEGER DEFAULT 0
-    )`,
-    
-    `CREATE TABLE IF NOT EXISTS user_queries (
-      id SERIAL PRIMARY KEY,
-      user_id BIGINT,
-      query TEXT,
-      intent TEXT,
-      timestamp TIMESTAMP DEFAULT NOW()
-    )`
-  ];
-  
-  for (const sql of tables) {
-    try {
-      await supabase.rpc('exec_sql', { sql });
-    } catch (e) {
-      // Table might already exist
-    }
-  }
-}
-
-// ========== INTELLIGENT INTENT RECOGNITION ==========
-class IntentRecognizer {
-  constructor() {
-    this.intents = {
-      schedule_today: ['today', 'today\'s schedule', 'what\'s today', 'classes today', 'сегодня', 'расписание на сегодня', 'что сегодня'],
-      schedule_tomorrow: ['tomorrow', 'tomorrow\'s schedule', 'what\'s tomorrow', 'classes tomorrow', 'завтра', 'расписание на завтра', 'что завтра'],
-      schedule_week: ['this week', 'weekly schedule', 'full week', 'whole week', 'week schedule', 'эта неделя', 'расписание на неделю', 'вся неделя'],
-      next_class: ['next', 'next class', 'what\'s next', 'следующая', 'следующая пара', 'что дальше'],
-      add_task: ['add task', 'new task', 'create task', 'добавить задачу', 'новая задача', 'создать задачу'],
-      show_tasks: ['my tasks', 'show tasks', 'list tasks', 'what tasks', 'мои задачи', 'показать задачи', 'список задач', 'какие задачи'],
-      complete_task: ['done', 'complete', 'finished', 'готово', 'сделано', 'завершено', 'выполнено'],
-      delete_task: ['delete task', 'remove task', 'удалить задачу', 'убрать задачу'],
-      mark_attendance: ['mark attendance', 'mark class', 'attended', 'отметить пару', 'отметить посещение', 'я был', 'посетил'],
-      show_stats: ['statistics', 'stats', 'progress', 'performance', 'how am i doing', 'статистика', 'прогресс', 'успеваемость', 'как дела'],
-      study_time: ['study', 'studied', 'учился', 'занимался', 'study session'],
-      help: ['help', 'what can you do', 'commands', 'помощь', 'что ты умеешь', 'команды'],
-      reminder: ['remind', 'reminder', 'напомни', 'напоминание'],
-      import_ics: ['import', 'ics', 'calendar', 'импорт', 'календарь'],
-      greeting: ['hello', 'hi', 'hey', 'привет', 'здравствуй'],
-      thanks: ['thanks', 'thank you', 'спасибо', 'благодарю'],
-      time: ['what time', 'current time', 'time now', 'который час', 'время сейчас'],
-      joke: ['joke', 'tell me a joke', 'шутка', 'расскажи шутку']
-    };
-  }
-  
-  recognize(text) {
-    const lowerText = text.toLowerCase();
-    
-    for (const [intent, keywords] of Object.entries(this.intents)) {
-      for (const keyword of keywords) {
-        if (lowerText.includes(keyword)) {
-          return intent;
-        }
-      }
-    }
-    
-    return 'unknown';
-  }
-  
-  extractTaskInfo(text) {
-    // Extract task name, due date, priority from natural language
-    const patterns = {
-      task: /(?:add|create|new)\s+(?:task\s+)?['"]?(.+?)['"]?(?:\s+(?:due|on|for|by)\s+)?/i,
-      dueDate: /(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?)/,
-      priority: /\b(high|medium|low|urgent|важный|средний|низкий)\b/i
-    };
-    
-    const taskMatch = text.match(patterns.task);
-    const dueMatch = text.match(patterns.dueDate);
-    const priorityMatch = text.match(patterns.priority);
-    
-    let priority = 'normal';
-    if (priorityMatch) {
-      const p = priorityMatch[1].toLowerCase();
-      if (p === 'high' || p === 'urgent' || p === 'важный') priority = 'high';
-      else if (p === 'low' || p === 'низкий') priority = 'low';
-      else priority = 'medium';
-    }
-    
-    let dueDate = dueMatch ? dueMatch[1] : null;
-    if (dueDate && dueDate.length === 10) {
-      dueDate += ' 23:59';
-    }
-    
-    return {
-      task: taskMatch ? taskMatch[1].trim() : null,
-      dueDate,
-      priority
-    };
-  }
-  
-  extractStudyInfo(text) {
-    const durationMatch = text.match(/(\d+)\s*(?:minutes?|min|минут|мин)/i);
-    const subjectMatch = text.match(/(?:for|for studying|по|для)\s+(\w+)/i);
-    
-    return {
-      duration: durationMatch ? parseInt(durationMatch[1]) : null,
-      subject: subjectMatch ? subjectMatch[1] : 'general'
-    };
-  }
-}
-
-const intentRecognizer = new IntentRecognizer();
-
-// ========== INTELLIGENT RESPONSE GENERATOR ==========
-class SmartResponseGenerator {
-  async generateInsights(userId) {
-    const stats = await getFullStats(userId);
-    const suggestions = [];
-    
-    if (stats.pendingTasks > 3) {
-      suggestions.push(`You have ${stats.pendingTasks} pending tasks. Focus on completing high-priority ones first!`);
-    }
-    
-    if (stats.attendanceRate < 70 && stats.totalClasses > 5) {
-      suggestions.push(`Your attendance is ${stats.attendanceRate}%. Try to attend more classes to improve!`);
-    }
-    
-    if (stats.studyTime.total < 300) {
-      suggestions.push(`You've studied ${Math.round(stats.studyTime.total/60)} hours total. Consistency is key!`);
-    }
-    
-    if (stats.taskCompletionRate > 80) {
-      suggestions.push(`Great task completion rate! You're very organized! 🌟`);
-    }
-    
-    if (suggestions.length === 0) {
-      suggestions.push("You're doing fantastic! Keep up the momentum! 🚀");
-    }
-    
-    return suggestions;
-  }
-  
-  generateMotivation(stats) {
-    const messages = [
-      `You've completed ${stats.completedTasks} tasks! Every task done is a step closer to your goals! 🎯`,
-      `With ${stats.attendanceRate}% attendance, you're building great habits! 📚`,
-      `${stats.studyTime.total} minutes of study time invested in your future! 💪`,
-      `You're in the top ${Math.floor(Math.random() * 30) + 10}% of productive students! 🌟`,
-      `Keep going! Your consistency is paying off! 🚀`
-    ];
-    return messages[Math.floor(Math.random() * messages.length)];
-  }
-  
-  async generateWeeklyReport(userId) {
-    const weekAgo = new Date();
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    
-    const [tasks, attendance, study] = await Promise.all([
-      supabase.from('tasks').select('*').eq('user_id', userId).gte('completed_date', weekAgo.toISOString()),
-      supabase.from('class_attendance').select('*').eq('user_id', userId).gte('date', weekAgo.toISOString().split('T')[0]),
-      supabase.from('study_sessions').select('duration').eq('user_id', userId).gte('date', weekAgo.toISOString().split('T')[0])
-    ]);
-    
-    const totalTasks = tasks.data?.length || 0;
-    const completedTasks = tasks.data?.filter(t => t.done === 1).length || 0;
-    const attendedClasses = attendance.data?.filter(a => a.attended === 1).length || 0;
-    const totalClasses = attendance.data?.length || 0;
-    const studyHours = (study.data?.reduce((sum, s) => sum + s.duration, 0) || 0) / 60;
-    
-    return {
-      tasksCompleted: completedTasks,
-      totalTasks,
-      attendance: totalClasses > 0 ? Math.round((attendedClasses / totalClasses) * 100) : 0,
-      studyHours: Math.round(studyHours * 10) / 10
-    };
-  }
-}
-
-const smartResponse = new SmartResponseGenerator();
-
-// ========== ENHANCED VK API HELPERS ==========
+// ========== VK API HELPERS ==========
 async function callVkApi(method, params, controller = null) {
   try {
     const url = new URL("https://api.vk.com/method/" + method);
@@ -1993,16 +1744,16 @@ async function sendMessage(userId, text, keyboard = null) {
   }
 }
 
-// ========== ENHANCED KEYBOARDS ==========
-function getMainKeyboard(lang = 'en') {
+// ========== KEYBOARD BUILDERS ==========
+function getMainKeyboard(lang) {
   if (lang === 'ru') {
     return JSON.stringify({
       one_time: false,
       buttons: [
         [{ action: { type: "text", label: "📅 Сегодня" }, color: "primary" }, { action: { type: "text", label: "📅 Завтра" }, color: "primary" }],
         [{ action: { type: "text", label: "⏰ Следующая" }, color: "secondary" }, { action: { type: "text", label: "📝 Задачи" }, color: "positive" }],
-        [{ action: { type: "text", label: "📊 Статистика" }, color: "positive" }, { action: { type: "text", label: "✅ Отметить" }, color: "primary" }],
-        [{ action: { type: "text", label: "📥 Импорт" }, color: "secondary" }, { action: { type: "text", label: "❓ Помощь" }, color: "secondary" }]
+        [{ action: { type: "text", label: "✅ Отметить" }, color: "positive" }, { action: { type: "text", label: "📊 Статистика" }, color: "secondary" }],
+        [{ action: { type: "text", label: "📥 Импорт" }, color: "primary" }, { action: { type: "text", label: "❓ Помощь" }, color: "secondary" }]
       ]
     });
   }
@@ -2012,8 +1763,8 @@ function getMainKeyboard(lang = 'en') {
     buttons: [
       [{ action: { type: "text", label: "📅 Today" }, color: "primary" }, { action: { type: "text", label: "📅 Tomorrow" }, color: "primary" }],
       [{ action: { type: "text", label: "⏰ Next" }, color: "secondary" }, { action: { type: "text", label: "📝 Tasks" }, color: "positive" }],
-      [{ action: { type: "text", label: "📊 Stats" }, color: "positive" }, { action: { type: "text", label: "✅ Mark" }, color: "primary" }],
-      [{ action: { type: "text", label: "📥 Import" }, color: "secondary" }, { action: { type: "text", label: "❓ Help" }, color: "secondary" }]
+      [{ action: { type: "text", label: "✅ Mark" }, color: "positive" }, { action: { type: "text", label: "📊 Stats" }, color: "secondary" }],
+      [{ action: { type: "text", label: "📥 Import" }, color: "primary" }, { action: { type: "text", label: "❓ Help" }, color: "secondary" }]
     ]
   });
 }
@@ -2074,58 +1825,41 @@ async function setUserName(userId, name) {
   }
 }
 
-async function updateUserStreaks(userId) {
+async function getUserReminderOffset(userId) {
   try {
-    const today = new Date().toISOString().split('T')[0];
-    
-    // Check if user was active yesterday
-    const { data: user } = await supabase
+    const cacheKey = `reminder_${userId}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
+    const { data } = await supabase
       .from("users")
-      .select("last_active, study_streak, task_streak")
+      .select("reminder_offset")
       .eq("vk_id", userId)
       .single();
-    
-    if (user?.last_active) {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = yesterday.toISOString().split('T')[0];
-      
-      if (user.last_active === yesterdayStr) {
-        // Update streaks based on daily activity
-        const { data: stats } = await supabase
-          .from("daily_stats")
-          .select("*")
-          .eq("user_id", userId)
-          .eq("date", today)
-          .single();
-        
-        const studyStreak = (stats?.study_minutes || 0) > 0 ? (user.study_streak || 0) + 1 : 0;
-        const taskStreak = (stats?.tasks_completed || 0) > 0 ? (user.task_streak || 0) + 1 : 0;
-        
-        await supabase
-          .from("users")
-          .update({ study_streak: studyStreak, task_streak: taskStreak, last_active: today })
-          .eq("vk_id", userId);
-      } else if (user.last_active !== today) {
-        // Reset streaks
-        await supabase
-          .from("users")
-          .update({ study_streak: 0, task_streak: 0, last_active: today })
-          .eq("vk_id", userId);
-      }
-    } else {
-      await supabase
-        .from("users")
-        .update({ last_active: today })
-        .eq("vk_id", userId);
-    }
+    const offset = data?.reminder_offset || 60;
+    setCached(cacheKey, offset);
+    return offset;
   } catch (error) {
-    console.error("updateUserStreaks error:", error.message);
+    return 60;
   }
 }
 
-// Schedule functions
-async function addClass(userId, subject, day, startTime, endTime, location = '', teacher = '') {
+async function setUserReminderOffset(userId, minutes) {
+  try {
+    minutes = Math.min(120, Math.max(5, minutes));
+    await supabase
+      .from("users")
+      .upsert({ vk_id: userId, reminder_offset: minutes }, { onConflict: "vk_id" });
+    setCached(`reminder_${userId}`, minutes);
+    return true;
+  } catch (error) {
+    console.error("setUserReminderOffset error:", error.message);
+    return false;
+  }
+}
+
+// Schedule Functions
+async function addClass(userId, subject, day, startTime, endTime, location = '') {
   try {
     const { error } = await supabase.from("schedule").insert({
       user_id: userId,
@@ -2133,8 +1867,7 @@ async function addClass(userId, subject, day, startTime, endTime, location = '',
       day,
       start_time: startTime,
       end_time: endTime,
-      location,
-      teacher
+      location
     });
     if (error) throw error;
     setCached(`schedule_${userId}`, null);
@@ -2180,19 +1913,10 @@ async function getTomorrowClasses(userId) {
   return schedule.filter(c => c.day === dayIndex);
 }
 
-async function getWeekSchedule(userId) {
-  const schedule = await getSchedule(userId);
-  const weekSchedule = {};
-  for (let i = 0; i < 7; i++) {
-    weekSchedule[i] = schedule.filter(c => c.day === i);
-  }
-  return weekSchedule;
-}
-
 async function getNextClass(userId) {
   const now = new Date();
   const currentDay = now.getDay() === 0 ? 6 : now.getDay() - 1;
-  const currentTime = now.getHours() * 60 + now.getMinutes();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
   
   const schedule = await getSchedule(userId);
   const sorted = [...schedule].sort((a, b) => {
@@ -2202,9 +1926,9 @@ async function getNextClass(userId) {
   
   for (const cls of sorted) {
     const [hours, minutes] = cls.start_time.split(':').map(Number);
-    const classTime = hours * 60 + minutes;
+    const classMinutes = hours * 60 + minutes;
     
-    if (cls.day > currentDay || (cls.day === currentDay && classTime > currentTime)) {
+    if (cls.day > currentDay || (cls.day === currentDay && classMinutes > currentMinutes)) {
       return cls;
     }
   }
@@ -2212,7 +1936,7 @@ async function getNextClass(userId) {
   return sorted.length > 0 ? sorted[0] : null;
 }
 
-// Task functions
+// Task Functions
 async function addTask(userId, task, dueDate, remindDays, priority = 'normal') {
   try {
     const { error } = await supabase.from("tasks").insert({
@@ -2278,7 +2002,10 @@ async function completeTask(taskId, userId) {
       .single();
     
     if (daily) {
-      await supabase.rpc('increment_task_count', { row_id: daily.id });
+      await supabase
+        .from("daily_stats")
+        .update({ tasks_completed: (daily.tasks_completed || 0) + 1 })
+        .eq("id", daily.id);
     } else {
       await supabase.from("daily_stats").insert({
         user_id: userId,
@@ -2298,24 +2025,6 @@ async function completeTask(taskId, userId) {
   }
 }
 
-async function deleteTask(taskId, userId) {
-  try {
-    const { error } = await supabase
-      .from("tasks")
-      .delete()
-      .eq("id", taskId)
-      .eq("user_id", userId);
-    
-    if (error) throw error;
-    setCached(`tasks_${userId}_true`, null);
-    setCached(`task_stats_${userId}`, null);
-    return true;
-  } catch (error) {
-    console.error("deleteTask error:", error.message);
-    return false;
-  }
-}
-
 async function findTaskByName(userId, taskName) {
   const tasks = await getTasks(userId, true);
   return tasks.find(t => 
@@ -2324,24 +2033,86 @@ async function findTaskByName(userId, taskName) {
   );
 }
 
-// Attendance functions
+async function getTaskStats(userId) {
+  try {
+    const cacheKey = `task_stats_${userId}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
+    const tasks = await getTasks(userId, false);
+    
+    if (tasks.length === 0) {
+      const result = { pending: 0, completed: 0, rate: 0 };
+      setCached(cacheKey, result);
+      return result;
+    }
+
+    const pending = tasks.filter(t => t.done === 0).length;
+    const completed = tasks.filter(t => t.done === 1).length;
+    const rate = tasks.length > 0 ? Math.round((completed / tasks.length) * 100) : 0;
+
+    const result = { pending, completed, rate };
+    setCached(cacheKey, result);
+    return result;
+  } catch (error) {
+    console.error("getTaskStats error:", error.message);
+    return { pending: 0, completed: 0, rate: 0 };
+  }
+}
+
+// Attendance Functions
 async function markAttended(userId, className) {
   try {
     const today = new Date().toISOString().split('T')[0];
     
-    const { error } = await supabase.from("class_attendance").upsert(
-      {
-        user_id: userId,
-        class_name: className,
-        date: today,
-        attended: 1,
-        missed: 0
-      },
-      { onConflict: "user_id,class_name,date" }
-    );
+    // Check if already marked
+    const { data: existing } = await supabase
+      .from("class_attendance")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("class_name", className)
+      .eq("date", today)
+      .single();
+    
+    if (existing) {
+      return { success: false, alreadyMarked: true };
+    }
+    
+    const { error } = await supabase.from("class_attendance").insert({
+      user_id: userId,
+      class_name: className,
+      date: today,
+      attended: 1,
+      missed: 0
+    });
     
     if (error) throw error;
     
+    // Get streak count
+    const { data: streak } = await supabase
+      .from("class_attendance")
+      .select("date")
+      .eq("user_id", userId)
+      .eq("attended", 1)
+      .order("date", { ascending: false })
+      .limit(5);
+    
+    let streakCount = 0;
+    let expectedDate = new Date(today);
+    for (const record of streak || []) {
+      const recordDate = new Date(record.date);
+      const diffDays = Math.floor((expectedDate - recordDate) / (1000 * 60 * 60 * 24));
+      if (diffDays === 1) {
+        streakCount++;
+        expectedDate = recordDate;
+      } else if (diffDays === 0) {
+        continue;
+      } else {
+        break;
+      }
+    }
+    
+    // Update daily stats
     const { data: daily } = await supabase
       .from("daily_stats")
       .select("id")
@@ -2350,7 +2121,10 @@ async function markAttended(userId, className) {
       .single();
     
     if (daily) {
-      await supabase.rpc('increment_attendance', { row_id: daily.id });
+      await supabase
+        .from("daily_stats")
+        .update({ classes_attended: (daily.classes_attended || 0) + 1 })
+        .eq("id", daily.id);
     } else {
       await supabase.from("daily_stats").insert({
         user_id: userId,
@@ -2362,11 +2136,10 @@ async function markAttended(userId, className) {
     }
     
     setCached(`att_stats_${userId}`, null);
-    await updateUserStreaks(userId);
-    return true;
+    return { success: true, alreadyMarked: false, streak: streakCount };
   } catch (error) {
     console.error("markAttended error:", error.message);
-    return false;
+    return { success: false, alreadyMarked: false };
   }
 }
 
@@ -2401,7 +2174,7 @@ async function getAttendanceStats(userId) {
   }
 }
 
-// Study functions
+// Study Functions
 async function addStudySession(userId, subject, duration) {
   try {
     const today = new Date().toISOString().split('T')[0];
@@ -2425,7 +2198,7 @@ async function addStudySession(userId, subject, duration) {
     if (daily) {
       await supabase
         .from("daily_stats")
-        .update({ study_minutes: daily.study_minutes + duration })
+        .update({ study_minutes: (daily.study_minutes || 0) + duration })
         .eq("id", daily.id);
     } else {
       await supabase.from("daily_stats").insert({
@@ -2437,7 +2210,6 @@ async function addStudySession(userId, subject, duration) {
       });
     }
     
-    await updateUserStreaks(userId);
     return true;
   } catch (error) {
     console.error("addStudySession error:", error.message);
@@ -2458,44 +2230,18 @@ async function getStudyStats(userId) {
       .eq("user_id", userId);
     
     if (!sessions || sessions.length === 0) {
-      return { total: 0, weekly: 0, today: 0 };
+      return { total: 0, weekly: 0, today: 0, avg: 0 };
     }
     
-    const total = sessions.reduce((sum, s) => sum + s.duration, 0);
-    const weekly = sessions.filter(s => s.date >= weekAgoStr).reduce((sum, s) => sum + s.duration, 0);
-    const todayStudy = sessions.filter(s => s.date === today).reduce((sum, s) => sum + s.duration, 0);
+    const total = sessions.reduce((sum, s) => sum + (s.duration || 0), 0);
+    const weekly = sessions.filter(s => s.date >= weekAgoStr).reduce((sum, s) => sum + (s.duration || 0), 0);
+    const todayStudy = sessions.filter(s => s.date === today).reduce((sum, s) => sum + (s.duration || 0), 0);
+    const avg = Math.round(weekly / 7);
     
-    return { total, weekly, today: todayStudy };
+    return { total, weekly, today: todayStudy, avg };
   } catch (error) {
     console.error("getStudyStats error:", error.message);
-    return { total: 0, weekly: 0, today: 0 };
-  }
-}
-
-async function getTaskStats(userId) {
-  try {
-    const cacheKey = `task_stats_${userId}`;
-    const cached = getCached(cacheKey);
-    if (cached) return cached;
-
-    const tasks = await getTasks(userId, false);
-    
-    if (tasks.length === 0) {
-      const result = { pending: 0, completed: 0, high: 0 };
-      setCached(cacheKey, result);
-      return result;
-    }
-
-    const pending = tasks.filter(t => t.done === 0).length;
-    const completed = tasks.filter(t => t.done === 1).length;
-    const high = tasks.filter(t => t.priority === 'high' && t.done === 1).length;
-
-    const result = { pending, completed, high };
-    setCached(cacheKey, result);
-    return result;
-  } catch (error) {
-    console.error("getTaskStats error:", error.message);
-    return { pending: 0, completed: 0, high: 0 };
+    return { total: 0, weekly: 0, today: 0, avg: 0 };
   }
 }
 
@@ -2504,29 +2250,7 @@ async function getClassCount(userId) {
   return schedule.length;
 }
 
-async function getFullStats(userId) {
-  const [taskStats, attendanceStats, studyStats, tasks] = await Promise.all([
-    getTaskStats(userId),
-    getAttendanceStats(userId),
-    getStudyStats(userId),
-    getTasks(userId, false)
-  ]);
-  
-  const totalTasks = tasks.length;
-  const completedTasks = tasks.filter(t => t.done === 1).length;
-  const taskCompletionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-  
-  return {
-    ...taskStats,
-    ...attendanceStats,
-    ...studyStats,
-    totalTasks,
-    completedTasks,
-    taskCompletionRate
-  };
-}
-
-// ========== ICS IMPORT WITH FILE SUPPORT ==========
+// ========== ICS IMPORT FUNCTIONS ==========
 async function importIcsFromUrl(userId, url) {
   try {
     const controller = new AbortController();
@@ -2580,7 +2304,7 @@ async function parseIcsAndSave(userId, icsContent) {
         currentEvent = null;
       } else if (currentEvent) {
         if (trimmed.startsWith('SUMMARY:')) {
-          currentEvent.subject = trimmed.substring(8).replace(/\\,/g, ',').replace(/\\n/g, ' ');
+          currentEvent.subject = trimmed.substring(8).replace(/\\,/g, ',').replace(/\\n/g, ' ').trim();
         } else if (trimmed.startsWith('DTSTART')) {
           const match = trimmed.match(/DTSTART(?:;TZID=[^:]+)?:(\d{8}T\d{6})|DTSTART:(\d{8})/);
           if (match) {
@@ -2594,21 +2318,20 @@ async function parseIcsAndSave(userId, icsContent) {
             else if (match[2]) currentEvent.endDate = match[2];
           }
         } else if (trimmed.startsWith('LOCATION:')) {
-          currentEvent.location = trimmed.substring(9).replace(/\\,/g, ',').replace(/\\n/g, ' ');
+          currentEvent.location = trimmed.substring(9).replace(/\\,/g, ',').replace(/\\n/g, ' ').trim();
         } else if (trimmed.startsWith('DESCRIPTION:')) {
           description = trimmed.substring(12);
         } else if (description && trimmed && !trimmed.includes(':')) {
           description += ' ' + trimmed;
-        } else if (trimmed.startsWith('RRULE:')) {
-          currentEvent.rrule = trimmed.substring(6);
         }
       }
     }
     
     let addedCount = 0;
+    const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     
     for (const event of events) {
-      if (!event.subject) continue;
+      if (!event.subject || event.subject === '') continue;
       
       let startTime = '09:00';
       let endTime = '10:00';
@@ -2626,6 +2349,13 @@ async function parseIcsAndSave(userId, icsContent) {
         const date = new Date(year, month - 1, day, hour, minute);
         dayOfWeek = date.getDay() === 0 ? 6 : date.getDay() - 1;
         startTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+        
+        if (event.endDateTime) {
+          const endTimeStr = event.endDateTime.substring(9, 15);
+          const endHour = parseInt(endTimeStr.substring(0, 2));
+          const endMinute = parseInt(endTimeStr.substring(2, 4));
+          endTime = `${String(endHour).padStart(2, '0')}:${String(endMinute).padStart(2, '0')}`;
+        }
       } else if (event.startDate && !event.startDateTime) {
         const dateStr = event.startDate;
         const year = parseInt(dateStr.substring(0, 4));
@@ -2635,23 +2365,10 @@ async function parseIcsAndSave(userId, icsContent) {
         dayOfWeek = date.getDay() === 0 ? 6 : date.getDay() - 1;
       }
       
-      if (event.endDateTime) {
-        const timeStr = event.endDateTime.substring(9, 15);
-        const hour = parseInt(timeStr.substring(0, 2));
-        const minute = parseInt(timeStr.substring(2, 4));
-        endTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-      }
-      
       const location = event.location || '';
       
       const success = await addClass(userId, event.subject, dayOfWeek, startTime, endTime, location);
       if (success) addedCount++;
-      
-      // Handle recurring events if present
-      if (event.rrule && addedCount === 1) {
-        // For recurring events, we'll add all occurrences or mark as recurring
-        console.log(`Recurring event detected: ${event.subject}`);
-      }
     }
     
     return addedCount;
@@ -2674,7 +2391,9 @@ async function checkAndSendReminders() {
     
     for (const user of users || []) {
       const schedule = await getSchedule(user.vk_id);
-      const offset = user.reminder_offset || 75;
+      const offset = user.reminder_offset || 60;
+      const lang = user.language || 'en';
+      const name = user.name || 'friend';
       
       for (const cls of schedule) {
         if (cls.day !== currentDay) continue;
@@ -2683,9 +2402,9 @@ async function checkAndSendReminders() {
         const classMinutes = hours * 60 + minutes;
         const reminderMinutes = classMinutes - offset;
         
-        // Check if within reminder window (60-90 minutes)
-        if (reminderMinutes <= currentMinutes && currentMinutes <= reminderMinutes + 5) {
-          const key = `reminder_${user.vk_id}_${currentDay}_${cls.start_time}`;
+        // Check if within reminder window (offset +/- 2 minutes)
+        if (reminderMinutes <= currentMinutes && currentMinutes <= reminderMinutes + 2) {
+          const key = `reminder_${user.vk_id}_${currentDay}_${cls.start_time}_${now.toDateString()}`;
           
           const { data: existing } = await supabase
             .from("reminders")
@@ -2694,57 +2413,22 @@ async function checkAndSendReminders() {
             .single();
           
           if (!existing) {
-            const lang = user.language || 'en';
-            const name = user.name || 'friend';
             const minutesUntil = classMinutes - currentMinutes;
             
-            const msg = getLocalizedResponse(lang, 'class_reminder', {
-              name,
-              subject: cls.subject,
-              location: cls.location || 'Online/Classroom',
-              start: cls.start_time,
-              end: cls.end_time,
-              minutes: minutesUntil
-            });
+            let msg = RESPONSES[lang].class_reminder || RESPONSES.en.class_reminder;
+            msg = msg.replace('{subject}', cls.subject)
+                     .replace('{time}', cls.start_time)
+                     .replace('{location}', cls.location || 'Classroom')
+                     .replace('{minutes}', minutesUntil);
             
             await sendMessage(user.vk_id, msg, getMainKeyboard(lang));
             
-            await supabase.from("reminders").insert({ key, user_id: user.vk_id, sent: 1, reminder_date: now });
-          }
-        }
-      }
-      
-      // Check for task reminders
-      const tasks = await getTasks(user.vk_id, true);
-      for (const task of tasks) {
-        const dueDate = new Date(task.due_date);
-        const daysUntil = Math.ceil((dueDate - now) / (1000 * 60 * 60 * 24));
-        
-        if (daysUntil <= task.remind_days && daysUntil > 0) {
-          const key = `task_reminder_${task.id}`;
-          const { data: existing } = await supabase
-            .from("reminders")
-            .select("key")
-            .eq("key", key)
-            .single();
-          
-          if (!existing) {
-            const lang = user.language || 'en';
-            const name = user.name || 'friend';
-            
-            let msg = getLocalizedResponse(lang, 'task_reminder', {
-              name,
-              task: task.task,
-              due_date: dueDate.toLocaleDateString(),
-              days_left: daysUntil
+            await supabase.from("reminders").insert({ 
+              key, 
+              user_id: user.vk_id, 
+              sent: 1, 
+              reminder_date: now 
             });
-            
-            if (task.priority === 'high' && daysUntil <= 1) {
-              msg = getLocalizedResponse(lang, 'high_priority_warning', { task: task.task }) + '\n\n' + msg;
-            }
-            
-            await sendMessage(user.vk_id, msg, getMainKeyboard(lang));
-            await supabase.from("reminders").insert({ key, user_id: user.vk_id, sent: 1 });
           }
         }
       }
@@ -2756,395 +2440,338 @@ async function checkAndSendReminders() {
 
 function startReminderSystem() {
   if (reminderInterval) clearInterval(reminderInterval);
-  reminderInterval = setInterval(checkAndSendReminders, 300000); // Every 5 minutes
+  reminderInterval = setInterval(checkAndSendReminders, 60000); // Check every minute
 }
 
-// ========== LOCALIZED RESPONSE HELPER ==========
-function getLocalizedResponse(lang, key, vars = {}) {
-  const responseSet = RESPONSES[lang] || RESPONSES.en;
-  let text = responseSet[key] || RESPONSES.en[key] || key;
-  
+// ========== MESSAGE HANDLER ==========
+function getResponse(lang, key, vars = {}) {
+  let text = RESPONSES[lang]?.[key] || RESPONSES.en[key] || key;
   Object.entries(vars).forEach(([k, v]) => {
     text = text.replace(new RegExp(`{${k}}`, 'g'), v);
   });
-  
   return text;
 }
 
-// ========== INTELLIGENT MESSAGE HANDLER ==========
 async function handleMessage(userId, text, attachments, lang) {
   try {
     const name = await getUserName(userId);
     const displayName = name || 'friend';
+    const lowerText = text.toLowerCase().trim();
     
-    // First time user
-    if (!name && !text.toLowerCase().match(/(my name is|call me|меня зовут|зовут|i am|я -|я )/)) {
-      await sendMessage(userId, getLocalizedResponse(lang, 'ask_name'), getMainKeyboard(lang));
+    // FIRST TIME USER - Ask for name
+    if (!name && !lowerText.match(/(my name is|call me|меня зовут|зовут|i am|я -|я )/)) {
+      await sendMessage(userId, getResponse(lang, 'ask_name'), getMainKeyboard(lang));
       return;
     }
     
-    // Extract name
+    // Extract name from introduction
     const nameMatch = text.match(/(?:my name is|call me|меня зовут|зовут|i am|я -|я )\s+([A-Za-zА-Яа-яёЁ]+)/i);
     if (nameMatch && !name) {
       const newName = nameMatch[1].charAt(0).toUpperCase() + nameMatch[1].slice(1).toLowerCase();
       await setUserName(userId, newName);
-      
-      const greeting = new Date().getHours() < 12 ? 'morning_greeting' : 
-                       new Date().getHours() < 18 ? 'afternoon_greeting' : 'evening_greeting';
-      
-      await sendMessage(userId, getLocalizedResponse(lang, greeting, { name: newName }), getMainKeyboard(lang));
+      await sendMessage(userId, getResponse(lang, 'got_name', { name: newName }), getMainKeyboard(lang));
       return;
     }
     
-    // Recognize intent
-    const intent = intentRecognizer.recognize(text);
-    const lowerText = text.toLowerCase();
+    // ========== CLASS REMINDER SETTINGS ==========
+    if (text.startsWith('/reminder')) {
+      const parts = text.split(/\s+/);
+      if (parts.length >= 2) {
+        const minutes = parseInt(parts[1]);
+        if (!isNaN(minutes) && minutes >= 5 && minutes <= 120) {
+          await setUserReminderOffset(userId, minutes);
+          await sendMessage(userId, getResponse(lang, 'reminder_updated', { minutes }), getMainKeyboard(lang));
+        } else {
+          await sendMessage(userId, getResponse(lang, 'reminder_settings', { minutes: await getUserReminderOffset(userId) }), getMainKeyboard(lang));
+        }
+      } else {
+        const current = await getUserReminderOffset(userId);
+        await sendMessage(userId, getResponse(lang, 'reminder_settings', { minutes: current }), getMainKeyboard(lang));
+      }
+      return;
+    }
     
-    // Handle different intents
-    switch(intent) {
-      case 'schedule_today': {
-        const classes = await getTodayClasses(userId);
-        if (classes.length === 0) {
-          await sendMessage(userId, getLocalizedResponse(lang, 'no_classes', { name: displayName }), getMainKeyboard(lang));
-        } else {
-          const dayNames = lang === 'ru' ? ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'] : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-          let classList = '';
-          for (const cls of classes) {
-            classList += `📚 ${cls.subject}\n   ⏰ ${cls.start_time} - ${cls.end_time}\n`;
-            if (cls.location) classList += `   📍 ${cls.location}\n`;
-            classList += '\n';
-          }
-          const today = new Date().toLocaleDateString(lang === 'ru' ? 'ru-RU' : 'en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-          await sendMessage(userId, getLocalizedResponse(lang, 'schedule_today', { name: displayName, date: today, classes: classList }), getMainKeyboard(lang));
+    // ========== TODAY'S SCHEDULE ==========
+    if (text === "📅 Today" || text === "📅 Сегодня" || lowerText.includes('today') || lowerText.includes('сегодня')) {
+      const classes = await getTodayClasses(userId);
+      if (classes.length === 0) {
+        await sendMessage(userId, getResponse(lang, 'no_classes', { name: displayName }), getMainKeyboard(lang));
+      } else {
+        const dayNames = lang === 'ru' ? ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'] : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        let classList = '';
+        for (let i = 0; i < classes.length; i++) {
+          const cls = classes[i];
+          classList += `${i+1}. **${cls.subject}** • ${cls.start_time}-${cls.end_time}\n`;
+          if (cls.location) classList += `   📍 ${cls.location}\n`;
+          classList += '\n';
         }
-        break;
+        const today = new Date().toLocaleDateString(lang === 'ru' ? 'ru-RU' : 'en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+        await sendMessage(userId, getResponse(lang, 'schedule_today', { date: today, classes: classList }), getMainKeyboard(lang));
       }
-      
-      case 'schedule_tomorrow': {
-        const classes = await getTomorrowClasses(userId);
-        if (classes.length === 0) {
-          await sendMessage(userId, getLocalizedResponse(lang, 'no_classes_tomorrow', { name: displayName }), getMainKeyboard(lang));
-        } else {
-          let classList = '';
-          for (const cls of classes) {
-            classList += `📚 ${cls.subject}\n   ⏰ ${cls.start_time} - ${cls.end_time}\n`;
-            if (cls.location) classList += `   📍 ${cls.location}\n`;
-            classList += '\n';
-          }
-          const tomorrow = new Date();
-          tomorrow.setDate(tomorrow.getDate() + 1);
-          const dateStr = tomorrow.toLocaleDateString(lang === 'ru' ? 'ru-RU' : 'en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-          await sendMessage(userId, getLocalizedResponse(lang, 'schedule_tomorrow', { name: displayName, date: dateStr, classes: classList }), getMainKeyboard(lang));
+      return;
+    }
+    
+    // ========== TOMORROW'S SCHEDULE ==========
+    if (text === "📅 Tomorrow" || text === "📅 Завтра" || lowerText.includes('tomorrow') || lowerText.includes('завтра')) {
+      const classes = await getTomorrowClasses(userId);
+      if (classes.length === 0) {
+        await sendMessage(userId, getResponse(lang, 'no_classes_tomorrow', { name: displayName }), getMainKeyboard(lang));
+      } else {
+        let classList = '';
+        for (let i = 0; i < classes.length; i++) {
+          const cls = classes[i];
+          classList += `${i+1}. **${cls.subject}** • ${cls.start_time}-${cls.end_time}\n`;
+          if (cls.location) classList += `   📍 ${cls.location}\n`;
+          classList += '\n';
         }
-        break;
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const dateStr = tomorrow.toLocaleDateString(lang === 'ru' ? 'ru-RU' : 'en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+        await sendMessage(userId, getResponse(lang, 'schedule_tomorrow', { date: dateStr, classes: classList }), getMainKeyboard(lang));
       }
-      
-      case 'schedule_week': {
-        const weekSchedule = await getWeekSchedule(userId);
-        const dayNames = lang === 'ru' 
-          ? ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
-          : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      return;
+    }
+    
+    // ========== NEXT CLASS ==========
+    if (text === "⏰ Next" || text === "⏰ Следующая" || lowerText.includes('next class') || lowerText.includes('следующая пара') || lowerText.includes("what's next")) {
+      const nextClass = await getNextClass(userId);
+      const reminderOffset = await getUserReminderOffset(userId);
+      if (nextClass) {
+        const now = new Date();
+        const [hours, minutes] = nextClass.start_time.split(':').map(Number);
+        let minutesUntil = (hours * 60 + minutes) - (now.getHours() * 60 + now.getMinutes());
+        minutesUntil = Math.max(0, minutesUntil);
         
-        let weekStr = '';
-        for (let i = 0; i < 7; i++) {
-          const classes = weekSchedule[i] || [];
-          weekStr += `**${dayNames[i]}**:\n`;
-          if (classes.length === 0) {
-            weekStr += `   ✨ No classes\n`;
-          } else {
-            for (const cls of classes) {
-              weekStr += `   📚 ${cls.subject} • ${cls.start_time}-${cls.end_time}\n`;
-            }
-          }
-          weekStr += '\n';
-        }
-        await sendMessage(userId, getLocalizedResponse(lang, 'schedule_week', { week_schedule: weekStr }), getMainKeyboard(lang));
-        break;
+        await sendMessage(userId, getResponse(lang, 'next_class', {
+          subject: nextClass.subject,
+          time: nextClass.start_time,
+          location: nextClass.location || 'Classroom',
+          minutes: minutesUntil,
+          reminder_minutes: reminderOffset
+        }), getMainKeyboard(lang));
+      } else {
+        await sendMessage(userId, getResponse(lang, 'no_next_class', { name: displayName }), getMainKeyboard(lang));
       }
-      
-      case 'next_class': {
-        const nextClass = await getNextClass(userId);
-        if (nextClass) {
-          const now = new Date();
-          const [hours, minutes] = nextClass.start_time.split(':').map(Number);
-          const classTime = new Date();
-          classTime.setHours(hours, minutes, 0, 0);
+      return;
+    }
+    
+    // ========== MARK ATTENDANCE BUTTON ==========
+    if (text === "✅ Mark" || text === "✅ Отметить" || lowerText.includes('mark attendance') || lowerText.includes('отметить пару')) {
+      const classes = await getTodayClasses(userId);
+      if (classes.length === 0) {
+        await sendMessage(userId, getResponse(lang, 'no_classes_attendance', { name: displayName }), getMainKeyboard(lang));
+      } else {
+        let classList = '';
+        for (let i = 0; i < classes.length; i++) {
+          classList += `${i+1}. ${classes[i].subject}\n`;
+        }
+        await sendMessage(userId, getResponse(lang, 'attendance_prompt', { classes: classList, count: classes.length }), getMainKeyboard(lang));
+        userStates.set(userId, { mode: 'attendance', classes });
+        
+        // Auto-clear state after 2 minutes
+        setTimeout(() => { if (userStates.get(userId)?.mode === 'attendance') userStates.delete(userId); }, 120000);
+      }
+      return;
+    }
+    
+    // Handle attendance by number (from prompt)
+    if (/^\d+$/.test(text) && text.length <= 2) {
+      const state = userStates.get(userId);
+      if (state?.mode === 'attendance') {
+        const idx = parseInt(text) - 1;
+        if (idx >= 0 && idx < state.classes.length) {
+          const className = state.classes[idx].subject;
+          const result = await markAttended(userId, className);
           
-          let minutesUntil = Math.round((classTime - now) / 60000);
-          minutesUntil = Math.max(0, minutesUntil);
-          
-          if (minutesUntil < 0 || (nextClass.day === now.getDay() === 0 ? 6 : now.getDay() - 1 && minutesUntil < 0)) {
-            // Class is tomorrow or later
-            await sendMessage(userId, getLocalizedResponse(lang, 'next_class_tomorrow', {
-              subject: nextClass.subject,
-              time: nextClass.start_time,
-              location: nextClass.location || 'Classroom'
-            }), getMainKeyboard(lang));
+          if (result.alreadyMarked) {
+            await sendMessage(userId, getResponse(lang, 'already_marked', { class_name: className }), getMainKeyboard(lang));
           } else {
-            await sendMessage(userId, getLocalizedResponse(lang, 'next_class', {
+            const streakMsg = result.streak > 0 ? getResponse(lang, 'attendance_streak', { streak: result.streak + 1 }) : '';
+            await sendMessage(userId, getResponse(lang, 'attendance_marked', { 
+              class_name: className, 
               name: displayName,
-              subject: nextClass.subject,
-              time: nextClass.start_time,
-              location: nextClass.location || 'Classroom',
-              minutes: minutesUntil
+              streak_message: streakMsg
             }), getMainKeyboard(lang));
           }
-        } else {
-          await sendMessage(userId, getLocalizedResponse(lang, 'no_next_class', { name: displayName }), getMainKeyboard(lang));
+          userStates.delete(userId);
+          return;
         }
-        break;
-      }
-      
-      case 'add_task': {
-        const taskInfo = intentRecognizer.extractTaskInfo(text);
-        if (taskInfo.task) {
-          let dueDate = taskInfo.dueDate;
-          if (!dueDate) {
-            // Default to 7 days from now
-            const defaultDate = new Date();
-            defaultDate.setDate(defaultDate.getDate() + 7);
-            defaultDate.setHours(23, 59, 0, 0);
-            dueDate = defaultDate.toISOString().slice(0, 16).replace('T', ' ');
-          }
-          
-          await addTask(userId, taskInfo.task, dueDate, 1, taskInfo.priority);
-          await sendMessage(userId, getLocalizedResponse(lang, 'task_added', {
-            name: displayName,
-            task: taskInfo.task,
-            due_date: new Date(dueDate).toLocaleDateString(),
-            days: 1
-          }), getMainKeyboard(lang));
-        } else {
-          await sendMessage(userId, "📝 Please specify the task name. Example: 'Add task Finish homework due 2025-12-20'", getMainKeyboard(lang));
-        }
-        break;
-      }
-      
-      case 'show_tasks': {
-        const tasks = await getTasks(userId, true);
-        const taskStats = await getTaskStats(userId);
-        
-        if (tasks.length === 0) {
-          await sendMessage(userId, getLocalizedResponse(lang, 'no_tasks', { name: displayName }), getMainKeyboard(lang));
-        } else {
-          let taskList = '';
-          for (let i = 0; i < Math.min(tasks.length, 10); i++) {
-            const task = tasks[i];
-            const dueDate = new Date(task.due_date);
-            const priorityIcon = task.priority === 'high' ? '🔴' : task.priority === 'medium' ? '🟡' : '🟢';
-            taskList += `${priorityIcon} ${i+1}. **${task.task}**\n   📅 Due: ${dueDate.toLocaleDateString()}\n`;
-            if (task.priority === 'high') taskList += `   ⚠️ HIGH PRIORITY\n`;
-            taskList += '\n';
-          }
-          if (tasks.length > 10) {
-            taskList += `\n... and ${tasks.length - 10} more tasks`;
-          }
-          
-          await sendMessage(userId, getLocalizedResponse(lang, 'tasks_header', {
-            name: displayName,
-            pending: taskStats.pending,
-            completed: taskStats.completed,
-            tasks: taskList
-          }), getMainKeyboard(lang));
-        }
-        break;
-      }
-      
-      case 'complete_task': {
-        const match = text.match(/(?:done|complete|finished|готово|сделано|выполнено|завершено)\s+(.+?)(?:\.|$)/i);
-        if (match) {
-          const taskName = match[1].trim();
-          const task = await findTaskByName(userId, taskName);
-          if (task) {
-            await completeTask(task.id, userId);
-            await sendMessage(userId, getLocalizedResponse(lang, 'task_completed', { name: displayName, task: task.task }), getMainKeyboard(lang));
-          } else {
-            await sendMessage(userId, getLocalizedResponse(lang, 'not_found', { query: taskName, category: 'tasks', name: displayName }), getMainKeyboard(lang));
-          }
-        } else {
-          await sendMessage(userId, "💬 Tell me what you completed! Example: 'Done homework' or 'Finished math assignment'", getMainKeyboard(lang));
-        }
-        break;
-      }
-      
-      case 'mark_attendance': {
-        const classes = await getTodayClasses(userId);
-        if (classes.length === 0) {
-          await sendMessage(userId, getLocalizedResponse(lang, 'no_classes_attendance', { name: displayName }), getMainKeyboard(lang));
-        } else {
-          let classList = '';
-          for (let i = 0; i < classes.length; i++) {
-            classList += `${i+1}. ${classes[i].subject} (${classes[i].start_time})\n`;
-          }
-          await sendMessage(userId, getLocalizedResponse(lang, 'attendance_prompt', { name: displayName, classes: classList }), getMainKeyboard(lang));
-          
-          // Store state that user is in attendance marking mode
-          userStates.set(userId, { mode: 'attendance', classes });
-        }
-        break;
-      }
-      
-      case 'study_time': {
-        const studyInfo = intentRecognizer.extractStudyInfo(text);
-        if (studyInfo.duration) {
-          await addStudySession(userId, studyInfo.subject, studyInfo.duration);
-          await sendMessage(userId, getLocalizedResponse(lang, 'study_logged', {
-            name: displayName,
-            duration: studyInfo.duration,
-            subject: studyInfo.subject
-          }), getMainKeyboard(lang));
-        } else {
-          await sendMessage(userId, getLocalizedResponse(lang, 'study_prompt', { name: displayName }), getMainKeyboard(lang));
-        }
-        break;
-      }
-      
-      case 'show_stats': {
-        const [taskStats, attendanceStats, studyStats, schedule] = await Promise.all([
-          getTaskStats(userId),
-          getAttendanceStats(userId),
-          getStudyStats(userId),
-          getSchedule(userId)
-        ]);
-        
-        const productivityScore = taskStats.pending + taskStats.completed > 0 
-          ? Math.round((taskStats.completed / (taskStats.completed + taskStats.pending)) * 100)
-          : 0;
-        
-        const prodBar = '█'.repeat(Math.floor(productivityScore / 10)) + '░'.repeat(10 - Math.floor(productivityScore / 10));
-        const attendBar = '█'.repeat(Math.floor(attendanceStats.rate / 10)) + '░'.repeat(10 - Math.floor(attendanceStats.rate / 10));
-        const avgDaily = studyStats.weekly > 0 ? Math.round(studyStats.weekly / 7) : 0;
-        
-        let msg = getLocalizedResponse(lang, 'stats_header') + '\n\n';
-        msg += getLocalizedResponse(lang, 'task_mastery', {
-          completed: taskStats.completed,
-          pending: taskStats.pending,
-          high: taskStats.high,
-          score: productivityScore,
-          bar: prodBar
-        }) + '\n\n';
-        msg += getLocalizedResponse(lang, 'attendance_section', {
-          total: attendanceStats.total,
-          attended: attendanceStats.attended,
-          missed: attendanceStats.missed,
-          rate: attendanceStats.rate,
-          bar: attendBar
-        }) + '\n\n';
-        msg += getLocalizedResponse(lang, 'study_section', {
-          today: studyStats.today,
-          week: studyStats.weekly,
-          total_study: studyStats.total,
-          avg: avgDaily
-        });
-        
-        const motivation = await smartResponse.generateMotivation({
-          completedTasks: taskStats.completed,
-          attendanceRate: attendanceStats.rate,
-          studyTime: studyStats
-        });
-        msg += '\n\n' + getLocalizedResponse(lang, 'motivation', { message: motivation });
-        
-        await sendMessage(userId, msg, getMainKeyboard(lang));
-        break;
-      }
-      
-      case 'import_ics': {
-        await sendMessage(userId, getLocalizedResponse(lang, 'import_instructions', { name: displayName }), getMainKeyboard(lang));
-        break;
-      }
-      
-      case 'help': {
-        await sendMessage(userId, getLocalizedResponse(lang, 'help_text', { name: displayName }), getMainKeyboard(lang));
-        break;
-      }
-      
-      case 'greeting': {
-        const hour = new Date().getHours();
-        let greetingKey = 'greeting';
-        if (hour < 12) greetingKey = 'morning_greeting';
-        else if (hour < 18) greetingKey = 'afternoon_greeting';
-        else greetingKey = 'evening_greeting';
-        
-        const suggestions = await smartResponse.generateInsights(userId);
-        let response = getLocalizedResponse(lang, greetingKey, { name: displayName });
-        if (suggestions.length > 0) {
-          response += '\n\n💡 ' + suggestions[0];
-        }
-        await sendMessage(userId, response, getMainKeyboard(lang));
-        break;
-      }
-      
-      case 'thanks': {
-        await sendMessage(userId, getLocalizedResponse(lang, 'thanks', { name: displayName }), getMainKeyboard(lang));
-        break;
-      }
-      
-      case 'joke': {
-        const jokes = {
-          en: [
-            "Why don't scientists trust atoms? Because they make up everything!",
-            "What do you call a fake noodle? An impasta!",
-            "Why did the scarecrow win an award? He was outstanding in his field!",
-            "What do you call a bear with no teeth? A gummy bear!",
-            "Why don't eggs tell jokes? They'd crack each other up!"
-          ],
-          ru: [
-            "Почему программисты путают Хэллоуин с Рождеством? Потому что 31 Oct = 25 Dec!",
-            "Что говорит один ноль другому? Без тебя я просто пустое место!",
-            "Почему студенты любят спать на лекциях? Потому что сон - лучшее лекарство от скуки!",
-            "Что общего между экзаменом и морем? Оба вызывают тошноту!"
-          ]
-        };
-        const jokeList = jokes[lang] || jokes.en;
-        const joke = jokeList[Math.floor(Math.random() * jokeList.length)];
-        await sendMessage(userId, getLocalizedResponse(lang, 'joke', { joke }), getMainKeyboard(lang));
-        break;
-      }
-      
-      default: {
-        // Handle number input for attendance
-        if (/^\d+$/.test(text) && text.length <= 2) {
-          const state = userStates.get(userId);
-          if (state?.mode === 'attendance') {
-            const idx = parseInt(text) - 1;
-            if (idx >= 0 && idx < state.classes.length) {
-              const className = state.classes[idx].subject;
-              await markAttended(userId, className);
-              await sendMessage(userId, getLocalizedResponse(lang, 'attendance_marked', { name: displayName, class_name: className }), getMainKeyboard(lang));
-              userStates.delete(userId);
-              return;
-            }
-          }
-        }
-        
-        // Check if text matches a class name
-        const todayClasses = await getTodayClasses(userId);
-        for (const cls of todayClasses) {
-          if (lowerText.includes(cls.subject.toLowerCase())) {
-            await markAttended(userId, cls.subject);
-            await sendMessage(userId, getLocalizedResponse(lang, 'attendance_marked', { name: displayName, class_name: cls.subject }), getMainKeyboard(lang));
-            return;
-          }
-        }
-        
-        // Intelligent fallback
-        const insights = await smartResponse.generateInsights(userId);
-        await sendMessage(userId, getLocalizedResponse(lang, 'unknown', { 
-          name: displayName, 
-          topic: text.substring(0, 30)
-        }) + '\n\n' + insights.slice(0, 2).join('\n'), getMainKeyboard(lang));
-        break;
       }
     }
     
-    // Clear state after handling
-    if (userStates.has(userId)) {
-      setTimeout(() => userStates.delete(userId), 30000);
+    // Handle attendance by class name mention
+    const todayClasses = await getTodayClasses(userId);
+    for (const cls of todayClasses) {
+      if (lowerText.includes(cls.subject.toLowerCase())) {
+        const result = await markAttended(userId, cls.subject);
+        if (result.alreadyMarked) {
+          await sendMessage(userId, getResponse(lang, 'already_marked', { class_name: cls.subject }), getMainKeyboard(lang));
+        } else {
+          const streakMsg = result.streak > 0 ? getResponse(lang, 'attendance_streak', { streak: result.streak + 1 }) : '';
+          await sendMessage(userId, getResponse(lang, 'attendance_marked', { 
+            class_name: cls.subject, 
+            name: displayName,
+            streak_message: streakMsg
+          }), getMainKeyboard(lang));
+        }
+        return;
+      }
     }
+    
+    // ========== TASKS BUTTON ==========
+    if (text === "📝 Tasks" || text === "📝 Задачи" || lowerText.includes('my tasks') || lowerText.includes('мои задачи')) {
+      const tasks = await getTasks(userId, true);
+      const stats = await getTaskStats(userId);
+      
+      if (tasks.length === 0) {
+        await sendMessage(userId, getResponse(lang, 'no_tasks', { name: displayName }), getMainKeyboard(lang));
+      } else {
+        let taskList = '';
+        for (let i = 0; i < Math.min(tasks.length, 15); i++) {
+          const task = tasks[i];
+          const dueDate = new Date(task.due_date);
+          const priorityIcon = task.priority === 'high' ? '🔴' : task.priority === 'medium' ? '🟡' : '🟢';
+          const daysLeft = Math.ceil((dueDate - new Date()) / (1000 * 60 * 60 * 24));
+          taskList += `${priorityIcon} ${i+1}. **${task.task}**\n   📅 Due: ${dueDate.toLocaleDateString()} (${daysLeft} days left)\n\n`;
+        }
+        if (tasks.length > 15) taskList += `\n... and ${tasks.length - 15} more tasks`;
+        
+        await sendMessage(userId, getResponse(lang, 'tasks_header', {
+          pending: stats.pending,
+          completed: stats.completed,
+          tasks: taskList
+        }), getMainKeyboard(lang));
+      }
+      return;
+    }
+    
+    // ========== COMPLETE TASK (Done [task]) ==========
+    const doneMatch = text.match(/(?:done|complete|finished|готово|сделано|выполнено|завершено)\s+(.+?)(?:\.|$)/i);
+    if (doneMatch) {
+      const taskName = doneMatch[1].trim();
+      const task = await findTaskByName(userId, taskName);
+      if (task) {
+        await completeTask(task.id, userId);
+        await sendMessage(userId, getResponse(lang, 'task_completed', { name: displayName, task: task.task }), getMainKeyboard(lang));
+      } else {
+        await sendMessage(userId, getResponse(lang, 'task_not_found', { task: taskName }), getMainKeyboard(lang));
+      }
+      return;
+    }
+    
+    // ========== STATISTICS ==========
+    if (text === "📊 Stats" || text === "📊 Статистика" || lowerText.includes('stats') || lowerText.includes('statistics') || lowerText.includes('статистика')) {
+      const [taskStats, attendanceStats, studyStats, totalClasses] = await Promise.all([
+        getTaskStats(userId),
+        getAttendanceStats(userId),
+        getStudyStats(userId),
+        getClassCount(userId)
+      ]);
+      
+      const prodBar = '█'.repeat(Math.floor(taskStats.rate / 10)) + '░'.repeat(10 - Math.floor(taskStats.rate / 10));
+      const attendBar = '█'.repeat(Math.floor(attendanceStats.rate / 10)) + '░'.repeat(10 - Math.floor(attendanceStats.rate / 10));
+      
+      let msg = getResponse(lang, 'stats_header');
+      msg += getResponse(lang, 'task_stats', {
+        completed: taskStats.completed,
+        pending: taskStats.pending,
+        rate: taskStats.rate,
+        bar: prodBar
+      }) + '\n\n';
+      msg += getResponse(lang, 'attendance_stats', {
+        total: attendanceStats.total,
+        attended: attendanceStats.attended,
+        missed: attendanceStats.missed,
+        rate: attendanceStats.rate,
+        bar: attendBar
+      }) + '\n\n';
+      msg += getResponse(lang, 'study_stats', {
+        today: studyStats.today,
+        week: studyStats.weekly,
+        total: studyStats.total,
+        avg: studyStats.avg
+      });
+      
+      // Add motivation
+      const motivationMsg = taskStats.rate > 80 ? "Excellent productivity! Keep crushing your goals! 🎯" :
+                           taskStats.rate > 50 ? "Good progress! A little push and you'll be at the top! 💪" :
+                           "Every task completed is a step forward. You've got this! 🌟";
+      msg += '\n\n' + getResponse(lang, 'motivation', { message: motivationMsg });
+      
+      await sendMessage(userId, msg, getMainKeyboard(lang));
+      return;
+    }
+    
+    // ========== IMPORT BUTTON ==========
+    if (text === "📥 Import" || text === "📥 Импорт" || lowerText.includes('import') || lowerText.includes('импорт')) {
+      await sendMessage(userId, getResponse(lang, 'import_instructions'), getMainKeyboard(lang));
+      return;
+    }
+    
+    // ========== HELP ==========
+    if (text === "❓ Help" || text === "❓ Помощь" || lowerText.includes('help') || lowerText.includes('помощь')) {
+      await sendMessage(userId, getResponse(lang, 'help_text'), getMainKeyboard(lang));
+      return;
+    }
+    
+    // ========== ICS IMPORT COMMAND ==========
+    if (text.startsWith('/ics')) {
+      const parts = text.split(/\s+/);
+      if (parts.length >= 2) {
+        const icsUrl = parts[1];
+        if (icsUrl.startsWith('http://') || icsUrl.startsWith('https://')) {
+          await sendMessage(userId, getResponse(lang, 'import_progress'), getMainKeyboard(lang));
+          const reminderOffset = await getUserReminderOffset(userId);
+          const count = await importIcsFromUrl(userId, icsUrl);
+          if (count > 0) {
+            await sendMessage(userId, getResponse(lang, 'import_success', { 
+              count, 
+              name: displayName,
+              reminder_minutes: reminderOffset
+            }), getMainKeyboard(lang));
+          } else {
+            await sendMessage(userId, getResponse(lang, 'import_fail'), getMainKeyboard(lang));
+          }
+        }
+      } else {
+        await sendMessage(userId, getResponse(lang, 'import_instructions'), getMainKeyboard(lang));
+      }
+      return;
+    }
+    
+    // ========== ADD TASK COMMAND ==========
+    if (text.startsWith('/task')) {
+      const match = text.match(/\/task\s+['"](.+?)['"]\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s+(\d+)(?:\s+(\w+))?/);
+      if (match) {
+        const taskName = match[1];
+        const dueDate = match[2];
+        const days = parseInt(match[3]);
+        const priority = match[4] || 'normal';
+        await addTask(userId, taskName, dueDate, days, priority);
+        await sendMessage(userId, getResponse(lang, 'task_added', {
+          task: taskName,
+          due_date: dueDate,
+          days: days,
+          priority: priority === 'high' ? 'High' : priority === 'medium' ? 'Medium' : 'Normal'
+        }), getMainKeyboard(lang));
+      } else {
+        await sendMessage(userId, getResponse(lang, 'task_format_error'), getMainKeyboard(lang));
+      }
+      return;
+    }
+    
+    // ========== THANKS ==========
+    if (lowerText.includes('thanks') || lowerText.includes('thank') || lowerText.includes('спасибо')) {
+      await sendMessage(userId, getResponse(lang, 'thanks', { name: displayName }), getMainKeyboard(lang));
+      return;
+    }
+    
+    // ========== DEFAULT / FALLBACK ==========
+    await sendMessage(userId, getResponse(lang, 'unknown'), getMainKeyboard(lang));
     
   } catch (error) {
     console.error("handleMessage error:", error);
-    await sendMessage(userId, getLocalizedResponse('en', 'error', { name: 'friend' }), getMainKeyboard('en'));
+    await sendMessage(userId, getResponse('en', 'error', { name: 'friend' }), getMainKeyboard('en'));
   }
 }
 
@@ -3171,21 +2798,26 @@ export async function handler(event) {
       
       console.log(`[${userId}] Message: "${text.substring(0, 50)}"`);
       
-      // Detect language
+      // DETECT LANGUAGE - This is critical for adaptation
       const lang = detectLanguage(text);
       await setUserLanguage(userId, lang);
       
       // Handle ICS file attachments
       for (const attachment of attachments) {
-        if (attachment.type === 'doc' && attachment.doc.title?.endsWith('.ics')) {
+        if (attachment.type === 'doc' && attachment.doc.title?.toLowerCase().endsWith('.ics')) {
           const fileUrl = attachment.doc.url;
-          await sendMessage(userId, getLocalizedResponse(lang, 'import_progress'), getMainKeyboard(lang));
+          await sendMessage(userId, getResponse(lang, 'import_progress'), getMainKeyboard(lang));
+          const reminderOffset = await getUserReminderOffset(userId);
           const count = await importIcsFromFile(userId, fileUrl);
+          const name = await getUserName(userId);
           if (count > 0) {
-            const name = await getUserName(userId);
-            await sendMessage(userId, getLocalizedResponse(lang, 'file_import_success', { count, name: name || 'friend' }), getMainKeyboard(lang));
+            await sendMessage(userId, getResponse(lang, 'import_success', { 
+              count, 
+              name: name || 'friend',
+              reminder_minutes: reminderOffset
+            }), getMainKeyboard(lang));
           } else {
-            await sendMessage(userId, getLocalizedResponse(lang, 'import_fail', { name: 'friend' }), getMainKeyboard(lang));
+            await sendMessage(userId, getResponse(lang, 'import_fail'), getMainKeyboard(lang));
           }
           return {
             statusCode: 200,
@@ -3197,62 +2829,18 @@ export async function handler(event) {
       // Handle ICS links in text
       const icsUrlMatch = text.match(/(https?:\/\/[^\s]+\.ics)/i);
       if (icsUrlMatch) {
-        await sendMessage(userId, getLocalizedResponse(lang, 'import_progress'), getMainKeyboard(lang));
+        await sendMessage(userId, getResponse(lang, 'import_progress'), getMainKeyboard(lang));
+        const reminderOffset = await getUserReminderOffset(userId);
         const count = await importIcsFromUrl(userId, icsUrlMatch[1]);
+        const name = await getUserName(userId);
         if (count > 0) {
-          const name = await getUserName(userId);
-          await sendMessage(userId, getLocalizedResponse(lang, 'import_success', { count, name: name || 'friend' }), getMainKeyboard(lang));
-        } else {
-          await sendMessage(userId, getLocalizedResponse(lang, 'import_fail', { name: 'friend' }), getMainKeyboard(lang));
-        }
-        return {
-          statusCode: 200,
-          body: JSON.stringify({ ok: true }),
-        };
-      }
-      
-      // /ics command
-      if (text.startsWith('/ics')) {
-        const parts = text.split(/\s+/);
-        if (parts.length >= 2) {
-          const icsUrl = parts[1];
-          if (icsUrl.startsWith('http://') || icsUrl.startsWith('https://')) {
-            await sendMessage(userId, getLocalizedResponse(lang, 'import_progress'), getMainKeyboard(lang));
-            const count = await importIcsFromUrl(userId, icsUrl);
-            if (count > 0) {
-              const name = await getUserName(userId);
-              await sendMessage(userId, getLocalizedResponse(lang, 'import_success', { count, name: name || 'friend' }), getMainKeyboard(lang));
-            } else {
-              await sendMessage(userId, getLocalizedResponse(lang, 'import_fail', { name: 'friend' }), getMainKeyboard(lang));
-            }
-          }
-        } else {
-          await sendMessage(userId, getLocalizedResponse(lang, 'import_instructions', { name: 'friend' }), getMainKeyboard(lang));
-        }
-        return {
-          statusCode: 200,
-          body: JSON.stringify({ ok: true }),
-        };
-      }
-      
-      // /task command
-      if (text.startsWith('/task')) {
-        const match = text.match(/\/task\s+['"](.+?)['"]\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s+(\d+)(?:\s+(\w+))?/);
-        if (match) {
-          const taskName = match[1];
-          const dueDate = match[2];
-          const days = parseInt(match[3]);
-          const priority = match[4] || 'normal';
-          await addTask(userId, taskName, dueDate, days, priority);
-          const name = await getUserName(userId);
-          await sendMessage(userId, getLocalizedResponse(lang, 'task_added', { 
-            name: name || 'friend', 
-            task: taskName, 
-            due_date: dueDate,
-            days
+          await sendMessage(userId, getResponse(lang, 'import_success', { 
+            count, 
+            name: name || 'friend',
+            reminder_minutes: reminderOffset
           }), getMainKeyboard(lang));
         } else {
-          await sendMessage(userId, getLocalizedResponse(lang, 'task_format'), getMainKeyboard(lang));
+          await sendMessage(userId, getResponse(lang, 'import_fail'), getMainKeyboard(lang));
         }
         return {
           statusCode: 200,
@@ -3260,7 +2848,7 @@ export async function handler(event) {
         };
       }
       
-      // Handle button/text intents
+      // Handle regular messages
       await handleMessage(userId, text, attachments, lang);
       
       return {
@@ -3282,9 +2870,7 @@ export async function handler(event) {
   }
 }
 
-// Initialize database and start reminder system on server start
-initDatabase().then(() => {
-  console.log("Database initialized");
-  startReminderSystem();
-  console.log("Reminder system started");
-});
+// ========== INITIALIZATION ==========
+console.log("Bot initialized with full functionality");
+startReminderSystem();
+console.log("Reminder system active - checking every minute");
