@@ -7574,9 +7574,969 @@
 #    main()
 
 
+#import logging
+#import sqlite3
+#import json
+#import requests
+#from datetime import datetime, timedelta
+#import vk_api
+#from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
+#from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+#from vk_api.utils import get_random_id
+#from icalendar import Calendar
+#from apscheduler.schedulers.background import BackgroundScheduler
+#import pytz
+#import re
+#import random
+#
+## ========== CONFIGURATION ==========
+#VK_TOKEN = "vk1.a.eZvEbyVQo2aLD4K-r_7DxudJLQ4iNke42CLOnxo-ewzkJhDCjgY-FFImW2JeNulCAByv9bzkSuo_VXZFEV1GbMGoTfjD_TlDUV_pfIIfXU2eJvNsYIVFvVRa7OQxAhzGJPle69aDCxH7jYlu-LbbfSLM-9ZVDiOkmo3zSdgiWYegoSqKJqtGAGoyldsJYC79Fc9up1aNsvk3uJ3NZaE6Xg"
+#GROUP_ID = 237363984
+#TIMEZONE = pytz.timezone("Asia/Novosibirsk")
+#
+#logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+#
+## ========== MULTILINGUAL RESPONSES ==========
+#RESPONSES = {
+#    'en': {
+#        'ask_name': "Hey there! 👋 I'm your personal assistant. What's your name?",
+#        'got_name': "Nice to meet you, {name}! 👋 I'm here to help with your schedule, tasks, and tracking your progress!",
+#        'schedule_today': "📅 **Today's Schedule, {name}:**\n\n{classes}\n💡 After each class, click '✅ Mark attended' to track your attendance!",
+#        'schedule_tomorrow': "📅 **Tomorrow's Schedule, {name}:**\n\n{classes}",
+#        'no_classes': "🎉 You have no classes today, {name}! Free day!",
+#        'no_classes_tomorrow': "🎉 No classes tomorrow, {name}! Enjoy your day off!",
+#        'next_class': "⏰ {name}, your next class is **{subject}** at {time}. That's in about {minutes} minutes!",
+#        'no_next_class': "🎉 You're all done with classes for today, {name}! Time to relax!",
+#        'tasks_header': "📋 **Your Tasks, {name}:**\n\n{tasks}\n💡 Say 'Done [task]' when you complete something!\n📊 Check 'Statistics' to see your progress!",
+#        'no_tasks': "✅ Great job, {name}! You have no pending tasks. All caught up! 🎉",
+#        'task_added': "✅ Got it, {name}! I've added '{task}' to your list. I'll remind you {days} day(s) before.",
+#        'task_completed': "🎉 Awesome work, {name}! I've marked '{task}' as complete!\n\n📊 Check 'Statistics' to see your updated progress!",
+#        'import_success': "🎉 Success! I've imported {count} classes into your schedule, {name}!\n\n✅ I'll remind you before each class.\n📅 Ask 'What's today?' to see your schedule!\n📊 Check 'Statistics' to track your progress!",
+#        'import_fail': "❌ Couldn't import from that link, {name}. Make sure it's a valid ICS file.",
+#        'import_instructions': "📥 **How to Import Your Schedule, {name}:**\n\n1️⃣ Send me an ICS link (like from your university portal)\n2️⃣ Use command: /ics [your-link]\n3️⃣ Attach an .ics file\n\nI'll automatically add all your classes and remind you before each one! ⏰",
+#        'attendance_prompt': "📚 Which class did you attend, {name}?\n\n{classes}\n\nReply with the number or name of the class.",
+#        'no_classes_attendance': "You have no classes today, {name}! 📭",
+#        'attendance_marked': "✅ Great! I've marked '{class_name}' as attended, {name}! Keep up the good attendance! 📚",
+#        'attendance_error': "❌ Couldn't find a class named '{class_name}', {name}. Please try again with the exact name.",
+#        'help_text': """🤖 **What I Can Do For You, {name}:**
+#
+#📅 **SCHEDULE**
+#• "What's today?" - Today's classes
+#• "What's tomorrow?" - Tomorrow's classes
+#• "What's next?" - Next class
+#• Send ICS link - Import your timetable
+#
+#✅ **ATTENDANCE**
+#• "Mark attended" - Track classes you attended
+#
+#📝 **TASKS**
+#• "My tasks" - See all tasks
+#• /task "Task" 2025-12-20 23:59 7 [priority]
+#• "Done [task]" - Mark complete
+#
+#📊 **STATISTICS**
+#• "Statistics" - Complete progress report
+#
+#📥 **IMPORT SCHEDULE**
+#• Just send me an ICS link
+#• Use /ics [your-link]
+#
+#⏰ **REMINDERS**
+#• Automatic 60-90 min before class
+#
+#🎯 **PRO TIP:** Track your attendance and tasks to see your productivity score!
+#
+#What would you like help with? 😊""",
+#        'stats_header': "📊 **YOUR STUDY STATISTICS, {name}!** 📊",
+#        'task_mastery': "📝 **TASK MASTERY**\n• ✅ Completed Tasks: {completed}\n• ⏳ Pending Tasks: {pending}\n• 🔴 High Priority Done: {high}\n• 🎯 Productivity Score: {score}%\n   [{bar}]",
+#        'attendance_section': "📚 **CLASS ATTENDANCE**\n• 📖 Total Classes: {total}\n• ✅ Attended: {attended}\n• ❌ Missed: {missed}\n• 📈 Attendance Rate: {rate}%\n   [{bar}]",
+#        'study_section': "⏱️ **STUDY TIME**\n• 📅 Today: {today} minutes\n• 📆 This Week: {week} minutes\n• 🏆 Total: {total_study} minutes\n• 💪 Avg Daily: {avg} min/day",
+#        'motivation': "💡 **MOTIVATION**\n{message}",
+#        'attendance_tip': "📌 *Track your attendance by clicking '✅ Mark attended' after each class!*",
+#        'thanks': "You're welcome, {name}! 😊 Anything else I can help with? Check 'Statistics' to see your progress!",
+#        'time': "🕐 It's {time}, {name}. What's on your schedule?",
+#        'joke': "😂 Here's a joke for you, {name}: {joke}",
+#        'greeting': "Hey {name}! 👋 Good to see you! Check 'Statistics' to see your progress! 🎉",
+#        'unknown': "That's interesting, {name}! How can I help you with that? Try 'Statistics' to see your progress!",
+#        'reminder': "⏰ **Reminder, {name}!**\n\n📚 {subject}\n🕐 {time}\n\nIn {minutes} minutes! Get ready! 📖\n\n✅ Don't forget to mark attendance after class!",
+#        'wrong_format': "Format: /task 'Task name' 2025-12-20 23:59 7 [priority]",
+#        'task_format': "Format: /task 'Task name' YYYY-MM-DD HH:MM days [priority]",
+#        'no_task_found': "Hmm, I couldn't find a task named '{task}', {name}. Can you check the name?",
+#        'file_import_success': "🎉 Success! I've imported {count} classes from your file, {name}!",
+#        'file_import_fail': "❌ Couldn't import from that file, {name}. Make sure it's a valid ICS file."
+#    },
+#    'ru': {
+#        'ask_name': "Привет! 👋 Я твой персональный помощник. Как тебя зовут?",
+#        'got_name': "Приятно познакомиться, {name}! 👋 Я здесь, чтобы помочь с расписанием, задачами и отслеживанием прогресса!",
+#        'schedule_today': "📅 **Расписание на сегодня, {name}:**\n\n{classes}\n💡 После каждой пары нажми '✅ Отметить пару', чтобы отслеживать посещаемость!",
+#        'schedule_tomorrow': "📅 **Расписание на завтра, {name}:**\n\n{classes}",
+#        'no_classes': "🎉 У тебя сегодня нет пар, {name}! Свободный день!",
+#        'no_classes_tomorrow': "🎉 Завтра нет пар, {name}! Отдыхай!",
+#        'next_class': "⏰ {name}, следующая пара: **{subject}** в {time}. Через {minutes} минут!",
+#        'no_next_class': "🎉 На сегодня пар больше нет, {name}! Время отдыхать!",
+#        'tasks_header': "📋 **Твои задачи, {name}:**\n\n{tasks}\n💡 Скажи 'Готово [задача]' когда сделаешь!\n📊 Проверь 'Статистику' чтобы увидеть прогресс!",
+#        'no_tasks': "✅ Отлично, {name}! Нет активных задач. Ты всё успел! 🎉",
+#        'task_added': "✅ Понял, {name}! Добавил '{task}' в список. Напомню за {days} дн.",
+#        'task_completed': "🎉 Молодец, {name}! Отметил '{task}' как выполненное!\n\n📊 Проверь 'Статистику' чтобы увидеть прогресс!",
+#        'import_success': "🎉 Отлично! Я импортировал {count} пар(ы) в расписание, {name}!\n\n✅ Я буду напоминать перед каждой парой.\n📅 Спроси 'Что сегодня?' чтобы увидеть расписание!\n📊 Проверь 'Статистику' чтобы отслеживать прогресс!",
+#        'import_fail': "❌ Не удалось импортировать по этой ссылке, {name}. Убедись, что это правильный ICS файл.",
+#        'import_instructions': "📥 **Как импортировать расписание, {name}:**\n\n1️⃣ Отправь мне ICS ссылку (как из университетского портала)\n2️⃣ Используй команду: /ics [ссылка]\n3️⃣ Прикрепи .ics файл\n\nЯ автоматически добавлю все пары и буду напоминать перед каждой! ⏰",
+#        'attendance_prompt': "📚 Какую пару ты посетил, {name}?\n\n{classes}\n\nОтветь номером или названием пары.",
+#        'no_classes_attendance': "У тебя сегодня нет пар, {name}! 📭",
+#        'attendance_marked': "✅ Отлично! Я отметил '{class_name}' как посещённое, {name}! Так держать! 📚",
+#        'attendance_error': "❌ Не могу найти пару '{class_name}', {name}. Попробуй ещё раз с точным названием.",
+#        'help_text': """🤖 **Что я умею, {name}:**
+#
+#📅 **РАСПИСАНИЕ**
+#• "Что сегодня?" - пары на сегодня
+#• "Что завтра?" - пары на завтра
+#• "Что дальше?" - следующую пару
+#• Отправь ICS ссылку - импорт расписания
+#
+#✅ **ПОСЕЩАЕМОСТЬ**
+#• "Отметить пару" - отметить посещённые пары
+#
+#📝 **ЗАДАЧИ**
+#• "Мои задачи" - список дел
+#• /task "Задача" 2025-12-20 23:59 7 [приоритет]
+#• "Готово [задача]" - отметить выполненное
+#
+#📊 **СТАТИСТИКА**
+#• "Статистика" - полный отчёт о прогрессе
+#
+#📥 **ИМПОРТ РАСПИСАНИЯ**
+#• Просто отправь ICS ссылку
+#• Используй /ics [ссылка]
+#
+#⏰ **НАПОМИНАНИЯ**
+#• Автоматически за 60-90 минут до пары
+#
+#🎯 **СОВЕТ:** Отмечай посещаемость и задачи, чтобы видеть свой прогресс!
+#
+#Чем могу помочь? 😊""",
+#        'stats_header': "📊 **ТВОЯ СТАТИСТИКА УЧЁБЫ, {name}!** 📊",
+#        'task_mastery': "📝 **ВЫПОЛНЕНИЕ ЗАДАЧ**\n• ✅ Выполнено задач: {completed}\n• ⏳ Ожидает: {pending}\n• 🔴 Высокий приоритет: {high}\n• 🎯 Продуктивность: {score}%\n   [{bar}]",
+#        'attendance_section': "📚 **ПОСЕЩАЕМОСТЬ**\n• 📖 Всего пар: {total}\n• ✅ Посещено: {attended}\n• ❌ Пропущено: {missed}\n• 📈 Посещаемость: {rate}%\n   [{bar}]",
+#        'study_section': "⏱️ **ВРЕМЯ УЧЁБЫ**\n• 📅 Сегодня: {today} минут\n• 📆 На этой неделе: {week} минут\n• 🏆 Всего: {total_study} минут\n• 💪 В среднем: {avg} мин/день",
+#        'motivation': "💡 **МОТИВАЦИЯ**\n{message}",
+#        'attendance_tip': "📌 *Отмечай посещаемость, нажимая '✅ Отметить пару' после каждой пары!*",
+#        'thanks': "Пожалуйста, {name}! 😊 Ещё что-то нужно? Проверь 'Статистику' чтобы увидеть прогресс!",
+#        'time': "🕐 Сейчас {time}, {name}. Что в планах?",
+#        'joke': "😂 Шутка для тебя, {name}: {joke}",
+#        'greeting': "Привет {name}! 👋 Рад тебя видеть! Проверь 'Статистику' чтобы увидеть прогресс! 🎉",
+#        'unknown': "Интересно, {name}! Чем я могу помочь? Попробуй 'Статистику' чтобы увидеть прогресс!",
+#        'reminder': "⏰ **Напоминание, {name}!**\n\n📚 {subject}\n🕐 {time}\n\nЧерез {minutes} минут! Готовься! 📖\n\n✅ Не забудь отметить посещаемость после пары!",
+#        'wrong_format': "Формат: /task 'Название задачи' 2025-12-20 23:59 7 [приоритет]",
+#        'task_format': "Формат: /task 'Название' ГГГГ-ММ-ДД ЧЧ:ММ дни [приоритет]",
+#        'no_task_found': "Хм, я не могу найти задачу '{task}', {name}. Проверь название.",
+#        'file_import_success': "🎉 Отлично! Я импортировал {count} пар(ы) из твоего файла, {name}!",
+#        'file_import_fail': "❌ Не удалось импортировать из файла, {name}. Убедись, что это правильный ICS файл."
+#    }
+#}
+#
+## ========== DATABASE SETUP ==========
+#def init_db():
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    
+#    # Users table
+#    c.execute("""CREATE TABLE IF NOT EXISTS users (
+#        vk_id INTEGER PRIMARY KEY,
+#        name TEXT DEFAULT '',
+#        language TEXT DEFAULT 'en',
+#        reminder_offset INTEGER DEFAULT 75,
+#        join_date DATETIME DEFAULT CURRENT_TIMESTAMP
+#    )""")
+#    
+#    # Schedule table
+#    c.execute("""CREATE TABLE IF NOT EXISTS schedule (
+#        id INTEGER PRIMARY KEY AUTOINCREMENT,
+#        user_id INTEGER,
+#        subject TEXT,
+#        day INTEGER,
+#        start_time TEXT,
+#        end_time TEXT,
+#        location TEXT,
+#        teacher TEXT
+#    )""")
+#    
+#    # Class attendance tracking
+#    c.execute("""CREATE TABLE IF NOT EXISTS class_attendance (
+#        id INTEGER PRIMARY KEY AUTOINCREMENT,
+#        user_id INTEGER,
+#        class_name TEXT,
+#        date DATE,
+#        attended INTEGER DEFAULT 0,
+#        missed INTEGER DEFAULT 0
+#    )""")
+#    
+#    # Tasks table
+#    c.execute("""CREATE TABLE IF NOT EXISTS tasks (
+#        id INTEGER PRIMARY KEY AUTOINCREMENT,
+#        user_id INTEGER,
+#        task TEXT,
+#        due_date TEXT,
+#        remind_days INTEGER,
+#        priority TEXT DEFAULT 'normal',
+#        category TEXT DEFAULT 'general',
+#        done INTEGER DEFAULT 0,
+#        completed_date DATETIME
+#    )""")
+#    
+#    # Study sessions
+#    c.execute("""CREATE TABLE IF NOT EXISTS study_sessions (
+#        id INTEGER PRIMARY KEY AUTOINCREMENT,
+#        user_id INTEGER,
+#        subject TEXT,
+#        duration INTEGER,
+#        date TEXT
+#    )""")
+#    
+#    # Daily statistics
+#    c.execute("""CREATE TABLE IF NOT EXISTS daily_stats (
+#        id INTEGER PRIMARY KEY AUTOINCREMENT,
+#        user_id INTEGER,
+#        date DATE,
+#        tasks_completed INTEGER DEFAULT 0,
+#        classes_attended INTEGER DEFAULT 0,
+#        study_minutes INTEGER DEFAULT 0
+#    )""")
+#    
+#    # Reminders
+#    c.execute("""CREATE TABLE IF NOT EXISTS reminders (
+#        key TEXT PRIMARY KEY,
+#        sent INTEGER DEFAULT 1,
+#        reminder_time DATETIME DEFAULT CURRENT_TIMESTAMP
+#    )""")
+#    
+#    # Conversations
+#    c.execute("""CREATE TABLE IF NOT EXISTS conversations (
+#        id INTEGER PRIMARY KEY AUTOINCREMENT,
+#        user_id INTEGER,
+#        message TEXT,
+#        response TEXT,
+#        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+#    )""")
+#    
+#    conn.commit()
+#    
+#    # Fix existing tables - add missing columns
+#    try:
+#        c.execute("PRAGMA table_info(tasks)")
+#        columns = [col[1] for col in c.fetchall()]
+#        if 'priority' not in columns:
+#            c.execute("ALTER TABLE tasks ADD COLUMN priority TEXT DEFAULT 'normal'")
+#        if 'category' not in columns:
+#            c.execute("ALTER TABLE tasks ADD COLUMN category TEXT DEFAULT 'general'")
+#        if 'completed_date' not in columns:
+#            c.execute("ALTER TABLE tasks ADD COLUMN completed_date DATETIME")
+#        
+#        c.execute("PRAGMA table_info(schedule)")
+#        schedule_cols = [col[1] for col in c.fetchall()]
+#        if 'location' not in schedule_cols:
+#            c.execute("ALTER TABLE schedule ADD COLUMN location TEXT DEFAULT ''")
+#        if 'teacher' not in schedule_cols:
+#            c.execute("ALTER TABLE schedule ADD COLUMN teacher TEXT DEFAULT ''")
+#            
+#        c.execute("PRAGMA table_info(reminders)")
+#        rem_cols = [col[1] for col in c.fetchall()]
+#        if 'reminder_time' not in rem_cols and 'timestamp' in rem_cols:
+#            c.execute("ALTER TABLE reminders RENAME COLUMN timestamp TO reminder_time")
+#    except Exception as e:
+#        logging.warning(f"Schema update warning: {e}")
+#    
+#    conn.commit()
+#    conn.close()
+#    logging.info("Database initialized")
+#
+#init_db()
+#
+## ========== HELPER FUNCTIONS ==========
+#def detect_language(text):
+#    if not text:
+#        return 'en'
+#    cyrillic = sum(1 for c in text if '\u0400' <= c <= '\u04FF')
+#    if cyrillic > len(text) * 0.1:
+#        return 'ru'
+#    return 'en'
+#
+#def get_user_name(user_id):
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    c.execute("SELECT name FROM users WHERE vk_id = ?", (user_id,))
+#    row = c.fetchone()
+#    conn.close()
+#    return row[0] if row and row[0] else None
+#
+#def set_user_name(user_id, name):
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    c.execute("INSERT OR REPLACE INTO users (vk_id, name) VALUES (?, ?)", (user_id, name))
+#    conn.commit()
+#    conn.close()
+#
+#def get_user_language(user_id):
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    c.execute("SELECT language FROM users WHERE vk_id = ?", (user_id,))
+#    row = c.fetchone()
+#    conn.close()
+#    return row[0] if row else 'en'
+#
+#def set_user_language(user_id, lang):
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    c.execute("UPDATE users SET language = ? WHERE vk_id = ?", (lang, user_id))
+#    conn.commit()
+#    conn.close()
+#
+#def get_response(user_id, key, **kwargs):
+#    lang = get_user_language(user_id) or 'en'
+#    responses = RESPONSES.get(lang, RESPONSES['en'])
+#    template = responses.get(key, key)
+#    try:
+#        return template.format(**kwargs)
+#    except:
+#        return template
+#
+## ========== SCHEDULE FUNCTIONS ==========
+#def add_class(user_id, subject, day, start, end, location='', teacher=''):
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    c.execute("INSERT INTO schedule (user_id, subject, day, start_time, end_time, location, teacher) VALUES (?,?,?,?,?,?,?)",
+#              (user_id, subject, day, start, end, location, teacher))
+#    conn.commit()
+#    conn.close()
+#
+#def get_today_classes(user_id):
+#    today = datetime.now(TIMEZONE).weekday()
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    c.execute("SELECT subject, start_time, end_time, location, teacher FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time", 
+#              (user_id, today))
+#    rows = c.fetchall()
+#    conn.close()
+#    return rows
+#
+#def get_tomorrow_classes(user_id):
+#    tomorrow = (datetime.now(TIMEZONE).weekday() + 1) % 7
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    c.execute("SELECT subject, start_time, end_time FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time", 
+#              (user_id, tomorrow))
+#    rows = c.fetchall()
+#    conn.close()
+#    return rows
+#
+#def get_next_class(user_id):
+#    now = datetime.now(TIMEZONE)
+#    current_day = now.weekday()
+#    current_time = now.strftime("%H:%M")
+#    
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    c.execute("SELECT subject, day, start_time FROM schedule WHERE user_id = ? ORDER BY day, start_time", (user_id,))
+#    classes = c.fetchall()
+#    conn.close()
+#    
+#    for subject, day, start in classes:
+#        if day > current_day or (day == current_day and start > current_time):
+#            return subject, start
+#    if classes:
+#        return classes[0][0], classes[0][2]
+#    return None, None
+#
+#def get_class_count(user_id):
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    c.execute("SELECT COUNT(*) FROM schedule WHERE user_id = ?", (user_id,))
+#    count = c.fetchone()[0]
+#    conn.close()
+#    return count
+#
+## ========== ATTENDANCE FUNCTIONS ==========
+#def mark_attended(user_id, class_name):
+#    date = datetime.now(TIMEZONE).strftime("%Y-%m-%d")
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    
+#    c.execute("SELECT id FROM class_attendance WHERE user_id = ? AND class_name = ? AND date = ?", 
+#              (user_id, class_name, date))
+#    existing = c.fetchone()
+#    
+#    if existing:
+#        c.execute("UPDATE class_attendance SET attended = 1, missed = 0 WHERE id = ?", (existing[0],))
+#    else:
+#        c.execute("INSERT INTO class_attendance (user_id, class_name, date, attended, missed) VALUES (?,?,?,1,0)",
+#                  (user_id, class_name, date))
+#    
+#    c.execute("SELECT id FROM daily_stats WHERE user_id = ? AND date = ?", (user_id, date))
+#    daily = c.fetchone()
+#    if daily:
+#        c.execute("UPDATE daily_stats SET classes_attended = classes_attended + 1 WHERE id = ?", (daily[0],))
+#    else:
+#        c.execute("INSERT INTO daily_stats (user_id, date, classes_attended) VALUES (?,?,1)", (user_id, date))
+#    
+#    conn.commit()
+#    conn.close()
+#
+## ========== TASK FUNCTIONS ==========
+#def add_task(user_id, task, due_date, remind_days, priority='normal'):
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    c.execute("INSERT INTO tasks (user_id, task, due_date, remind_days, priority, done) VALUES (?,?,?,?,?,0)",
+#              (user_id, task, due_date, remind_days, priority))
+#    conn.commit()
+#    conn.close()
+#
+#def get_tasks(user_id):
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    c.execute("SELECT id, task, due_date, remind_days, priority FROM tasks WHERE user_id = ? AND done = 0 ORDER BY due_date", (user_id,))
+#    rows = c.fetchall()
+#    conn.close()
+#    return rows
+#
+#def complete_task(task_id, user_id):
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    completed_date = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+#    c.execute("UPDATE tasks SET done = 1, completed_date = ? WHERE id = ? AND user_id = ?", 
+#              (completed_date, task_id, user_id))
+#    
+#    today = datetime.now(TIMEZONE).strftime("%Y-%m-%d")
+#    c.execute("SELECT id FROM daily_stats WHERE user_id = ? AND date = ?", (user_id, today))
+#    daily = c.fetchone()
+#    if daily:
+#        c.execute("UPDATE daily_stats SET tasks_completed = tasks_completed + 1 WHERE id = ?", (daily[0],))
+#    else:
+#        c.execute("INSERT INTO daily_stats (user_id, date, tasks_completed) VALUES (?,?,1)", (user_id, today))
+#    
+#    conn.commit()
+#    conn.close()
+#
+#def get_task_stats(user_id):
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND done = 0", (user_id,))
+#    pending = c.fetchone()[0]
+#    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND done = 1", (user_id,))
+#    completed = c.fetchone()[0]
+#    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND done = 1 AND priority = 'high'", (user_id,))
+#    high = c.fetchone()[0]
+#    conn.close()
+#    return pending, completed, high
+#
+## ========== STUDY FUNCTIONS ==========
+#def add_study_session(user_id, subject, duration):
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    today = datetime.now(TIMEZONE).strftime("%Y-%m-%d")
+#    c.execute("INSERT INTO study_sessions (user_id, subject, duration, date) VALUES (?,?,?,?)",
+#              (user_id, subject, duration, today))
+#    
+#    c.execute("SELECT id FROM daily_stats WHERE user_id = ? AND date = ?", (user_id, today))
+#    daily = c.fetchone()
+#    if daily:
+#        c.execute("UPDATE daily_stats SET study_minutes = study_minutes + ? WHERE id = ?", (duration, daily[0]))
+#    else:
+#        c.execute("INSERT INTO daily_stats (user_id, date, study_minutes) VALUES (?,?,?)", (user_id, today, duration))
+#    
+#    conn.commit()
+#    conn.close()
+#
+#def get_study_stats(user_id):
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    
+#    c.execute("SELECT SUM(duration) FROM study_sessions WHERE user_id = ?", (user_id,))
+#    total = c.fetchone()[0] or 0
+#    
+#    c.execute("SELECT SUM(duration) FROM study_sessions WHERE user_id = ? AND date >= date('now', '-7 days')", (user_id,))
+#    weekly = c.fetchone()[0] or 0
+#    
+#    c.execute("SELECT SUM(duration) FROM study_sessions WHERE user_id = ? AND date = date('now')", (user_id,))
+#    today = c.fetchone()[0] or 0
+#    
+#    conn.close()
+#    return total, weekly, today
+#
+## ========== STATISTICS FUNCTIONS ==========
+#def get_attendance_stats(user_id):
+#    conn = sqlite3.connect("assistant.db")
+#    c = conn.cursor()
+#    c.execute("SELECT COUNT(*) FROM class_attendance WHERE user_id = ? AND attended = 1", (user_id,))
+#    attended = c.fetchone()[0]
+#    c.execute("SELECT COUNT(*) FROM class_attendance WHERE user_id = ? AND missed = 1", (user_id,))
+#    missed = c.fetchone()[0]
+#    conn.close()
+#    return attended, missed
+#
+## ========== ICS IMPORT ==========
+#def import_ics_from_link(user_id, url):
+#    try:
+#        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+#        response = requests.get(url, timeout=30, headers=headers)
+#        response.raise_for_status()
+#        
+#        cal = Calendar.from_ical(response.text)
+#        count = 0
+#        
+#        for component in cal.walk():
+#            if component.name == "VEVENT":
+#                subject = str(component.get('SUMMARY', 'Class'))
+#                dtstart = component.get('DTSTART')
+#                dtend = component.get('DTEND')
+#                
+#                if dtstart and dtend:
+#                    start = dtstart.dt
+#                    end = dtend.dt
+#                    if not isinstance(start, datetime):
+#                        start = datetime.combine(start, datetime.min.time())
+#                    
+#                    location = str(component.get('LOCATION', ''))
+#                    add_class(user_id, subject, start.weekday(), start.strftime("%H:%M"), end.strftime("%H:%M"), location, '')
+#                    count += 1
+#        return count
+#    except Exception as e:
+#        logging.error(f"ICS import error: {e}")
+#        return -1
+#
+## ========== BOT FUNCTIONS ==========
+#def send_message(vk, user_id, text, keyboard=None):
+#    try:
+#        if not keyboard:
+#            keyboard = VkKeyboard().get_empty_keyboard()
+#        vk.messages.send(user_id=user_id, message=text, random_id=get_random_id(), keyboard=keyboard)
+#    except Exception as e:
+#        logging.error(f"Send error: {e}")
+#
+#def get_keyboard(lang='en'):
+#    keyboard = VkKeyboard(one_time=False)
+#    if lang == 'ru':
+#        keyboard.add_button("📅 Что сегодня?", color=VkKeyboardColor.PRIMARY)
+#        keyboard.add_button("📅 Что завтра?", color=VkKeyboardColor.PRIMARY)
+#        keyboard.add_line()
+#        keyboard.add_button("⏰ Что дальше?", color=VkKeyboardColor.SECONDARY)
+#        keyboard.add_button("📝 Мои задачи", color=VkKeyboardColor.SECONDARY)
+#        keyboard.add_line()
+#        keyboard.add_button("📊 Статистика", color=VkKeyboardColor.POSITIVE)
+#        keyboard.add_button("📥 Импорт", color=VkKeyboardColor.POSITIVE)
+#        keyboard.add_line()
+#        keyboard.add_button("✅ Отметить", color=VkKeyboardColor.PRIMARY)
+#        keyboard.add_button("❓ Помощь", color=VkKeyboardColor.PRIMARY)
+#    else:
+#        keyboard.add_button("📅 What's today?", color=VkKeyboardColor.PRIMARY)
+#        keyboard.add_button("📅 What's tomorrow?", color=VkKeyboardColor.PRIMARY)
+#        keyboard.add_line()
+#        keyboard.add_button("⏰ What's next?", color=VkKeyboardColor.SECONDARY)
+#        keyboard.add_button("📝 My tasks", color=VkKeyboardColor.SECONDARY)
+#        keyboard.add_line()
+#        keyboard.add_button("📊 Statistics", color=VkKeyboardColor.POSITIVE)
+#        keyboard.add_button("📥 Import", color=VkKeyboardColor.POSITIVE)
+#        keyboard.add_line()
+#        keyboard.add_button("✅ Mark", color=VkKeyboardColor.PRIMARY)
+#        keyboard.add_button("❓ Help", color=VkKeyboardColor.PRIMARY)
+#    return keyboard.get_keyboard()
+#
+## ========== MAIN MESSAGE HANDLER ==========
+#def handle_message(vk, user_id, text, attachments):
+#    # Detect and set language
+#    lang = detect_language(text)
+#    set_user_language(user_id, lang)
+#    
+#    name = get_user_name(user_id)
+#    
+#    # First time user - ask for name
+#    if not name and not any(word in text.lower() for word in ['my name is', 'call me', 'меня зовут', 'зовут']):
+#        send_message(vk, user_id, get_response(user_id, 'ask_name'), get_keyboard(lang))
+#        return
+#    
+#    # Extract name from introduction
+#    name_match = re.search(r'(?:my name is|call me|меня зовут|зовут)\s+([A-Za-zА-Яа-я]+)', text, re.IGNORECASE)
+#    if name_match and not name:
+#        name = name_match.group(1).capitalize()
+#        set_user_name(user_id, name)
+#        send_message(vk, user_id, get_response(user_id, 'got_name', name=name), get_keyboard(lang))
+#        return
+#    
+#    # Mark attendance button
+#    if text in ["✅ Mark", "✅ Отметить"] or text in ["✅ Mark attended", "✅ Отметить пару"]:
+#        classes = get_today_classes(user_id)
+#        if classes:
+#            class_list = "\n".join([f"{i+1}. {subj}" for i, (subj, _, _, _, _) in enumerate(classes)])
+#            send_message(vk, user_id, get_response(user_id, 'attendance_prompt', name=name, classes=class_list), get_keyboard(lang))
+#        else:
+#            send_message(vk, user_id, get_response(user_id, 'no_classes_attendance', name=name), get_keyboard(lang))
+#        return
+#    
+#    # Handle attendance reply (number or name)
+#    if text.isdigit() and len(text) <= 2:
+#        classes = get_today_classes(user_id)
+#        idx = int(text) - 1
+#        if 0 <= idx < len(classes):
+#            class_name = classes[idx][0]
+#            mark_attended(user_id, class_name)
+#            send_message(vk, user_id, get_response(user_id, 'attendance_marked', name=name, class_name=class_name), get_keyboard(lang))
+#            return
+#    
+#    # Check if text matches a class name for attendance
+#    classes = get_today_classes(user_id)
+#    for subj, _, _, _, _ in classes:
+#        if subj.lower() in text.lower() or text.lower() in subj.lower():
+#            mark_attended(user_id, subj)
+#            send_message(vk, user_id, get_response(user_id, 'attendance_marked', name=name, class_name=subj), get_keyboard(lang))
+#            return
+#    
+#    # ICS link detection
+#    if '.ics' in text and ('http://' in text or 'https://' in text):
+#        url_match = re.search(r'(https?://[^\s]+\.ics)', text)
+#        if url_match:
+#            send_message(vk, user_id, "⏳ " + ("Importing your schedule..." if lang == 'en' else "Импортирую расписание..."), get_keyboard(lang))
+#            count = import_ics_from_link(user_id, url_match.group(1))
+#            if count > 0:
+#                send_message(vk, user_id, get_response(user_id, 'import_success', count=count, name=name), get_keyboard(lang))
+#            else:
+#                send_message(vk, user_id, get_response(user_id, 'import_fail', name=name), get_keyboard(lang))
+#        return
+#    
+#    # /ics command
+#    if text.startswith('/ics'):
+#        parts = text.split(maxsplit=1)
+#        if len(parts) == 2:
+#            ics_url = parts[1].strip()
+#            if ics_url.startswith(('http://', 'https://')):
+#                send_message(vk, user_id, "⏳ " + ("Importing..." if lang == 'en' else "Импортирую..."), get_keyboard(lang))
+#                count = import_ics_from_link(user_id, ics_url)
+#                if count > 0:
+#                    send_message(vk, user_id, get_response(user_id, 'import_success', count=count, name=name), get_keyboard(lang))
+#                else:
+#                    send_message(vk, user_id, get_response(user_id, 'import_fail', name=name), get_keyboard(lang))
+#            else:
+#                send_message(vk, user_id, "❌ " + ("Please provide a valid HTTP or HTTPS link." if lang == 'en' else "Пожалуйста, предоставьте действительную HTTP или HTTPS ссылку."), get_keyboard(lang))
+#        else:
+#            send_message(vk, user_id, get_response(user_id, 'import_instructions', name=name), get_keyboard(lang))
+#        return
+#    
+#    # Import button
+#    if text in ["📥 Import", "📥 Импорт"] or "how to import" in text.lower() or "как импортировать" in text.lower():
+#        send_message(vk, user_id, get_response(user_id, 'import_instructions', name=name), get_keyboard(lang))
+#        return
+#    
+#    # /task command
+#    if text.startswith('/task'):
+#        parts = text.split(maxsplit=3)
+#        if len(parts) >= 4:
+#            _, task, due_date, days = parts[0], parts[1], parts[2], parts[3]
+#            priority = parts[4] if len(parts) > 4 else 'normal'
+#            if days.isdigit():
+#                add_task(user_id, task, due_date, int(days), priority)
+#                send_message(vk, user_id, get_response(user_id, 'task_added', name=name, task=task, days=days), get_keyboard(lang))
+#            else:
+#                send_message(vk, user_id, get_response(user_id, 'wrong_format'), get_keyboard(lang))
+#        else:
+#            send_message(vk, user_id, get_response(user_id, 'task_format'), get_keyboard(lang))
+#        return
+#    
+#    # Statistics
+#    if text in ["📊 Statistics", "📊 Статистика"] or "statistics" in text.lower() or "stats" in text.lower() or "статистика" in text.lower():
+#        # Get all stats
+#        total_classes = get_class_count(user_id)
+#        pending, completed, high = get_task_stats(user_id)
+#        attended, missed = get_attendance_stats(user_id)
+#        total_study, weekly_study, today_study = get_study_stats(user_id)
+#        
+#        # Calculate rates
+#        attendance_rate = 0
+#        if attended + missed > 0:
+#            attendance_rate = round((attended / (attended + missed)) * 100, 1)
+#        
+#        productivity_score = 0
+#        if completed + pending > 0:
+#            productivity_score = int((completed / (completed + pending)) * 100)
+#        
+#        # Create progress bars
+#        prod_bar = "█" * (productivity_score // 10) + "░" * (10 - (productivity_score // 10))
+#        attend_bar = "█" * int(attendance_rate / 10) + "░" * (10 - int(attendance_rate / 10))
+#        
+#        avg_daily = weekly_study // 7 if weekly_study > 0 else 0
+#        
+#        # Build message
+#        msg = get_response(user_id, 'stats_header', name=name) + "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+#        msg += get_response(user_id, 'task_mastery', completed=completed, pending=pending, high=high, score=productivity_score, bar=prod_bar) + "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+#        msg += get_response(user_id, 'attendance_section', total=total_classes, attended=attended, missed=missed, rate=attendance_rate, bar=attend_bar) + "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+#        msg += get_response(user_id, 'study_section', today=today_study, week=weekly_study, total_study=total_study, avg=avg_daily) + "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+#        
+#        motivations = [
+#            "You're doing amazing! Keep pushing forward! 💪",
+#            "Every step counts! Progress over perfection! 🌟",
+#            "Your dedication is inspiring! 🎯",
+#            "Small daily improvements lead to big results! 📈",
+#            "You've got this! Keep up the great work! 🚀"
+#        ] if lang == 'en' else [
+#            "У тебя отлично получается! Продолжай в том же духе! 💪",
+#            "Каждый шаг имеет значение! Прогресс важнее совершенства! 🌟",
+#            "Твоя целеустремлённость вдохновляет! 🎯",
+#            "Маленькие ежедневные улучшения ведут к большим результатам! 📈",
+#            "У тебя всё получится! Продолжай в том же духе! 🚀"
+#        ]
+#        
+#        msg += get_response(user_id, 'motivation', message=random.choice(motivations)) + "\n\n"
+#        msg += get_response(user_id, 'attendance_tip')
+#        
+#        send_message(vk, user_id, msg, get_keyboard(lang))
+#        return
+#    
+#    text_lower = text.lower()
+#    
+#    # Today's schedule
+#    if any(word in text_lower for word in ['today', 'сегодня', "what's today", 'что сегодня']):
+#        classes = get_today_classes(user_id)
+#        if classes:
+#            days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+#            if lang == 'ru':
+#                days = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+#            class_list = ""
+#            for subj, start, end, loc, teacher in classes:
+#                class_list += f"⏰ {start}-{end} • **{subj}**\n"
+#                if loc:
+#                    class_list += f"   📍 {loc}\n"
+#                class_list += "\n"
+#            send_message(vk, user_id, get_response(user_id, 'schedule_today', name=name, classes=class_list), get_keyboard(lang))
+#        else:
+#            send_message(vk, user_id, get_response(user_id, 'no_classes', name=name), get_keyboard(lang))
+#        return
+#    
+#    # Tomorrow's schedule
+#    if any(word in text_lower for word in ['tomorrow', 'завтра', "what's tomorrow", 'что завтра']):
+#        classes = get_tomorrow_classes(user_id)
+#        if classes:
+#            class_list = ""
+#            for subj, start, end, loc, teacher in classes:
+#                class_list += f"⏰ {start}-{end} • **{subj}**\n"
+#                if loc:
+#                    class_list += f"   📍 {loc}\n"
+#                class_list += "\n"
+#            send_message(vk, user_id, get_response(user_id, 'schedule_tomorrow', name=name, classes=class_list), get_keyboard(lang))
+#        else:
+#            send_message(vk, user_id, get_response(user_id, 'no_classes_tomorrow', name=name), get_keyboard(lang))
+#        return
+#    
+#    # Next class
+#    if any(word in text_lower for word in ['next', "what's next", 'дальше', 'следующая']):
+#        subject, time = get_next_class(user_id)
+#        if subject:
+#            now = datetime.now(TIMEZONE)
+#            hour, minute = map(int, time.split(':'))
+#            class_time = now.replace(hour=hour, minute=minute, second=0)
+#            minutes = int((class_time - now).total_seconds() / 60)
+#            if minutes > 0:
+#                send_message(vk, user_id, get_response(user_id, 'next_class', name=name, subject=subject, time=time, minutes=minutes), get_keyboard(lang))
+#            else:
+#                send_message(vk, user_id, get_response(user_id, 'next_class', name=name, subject=subject, time=time, minutes=0), get_keyboard(lang))
+#        else:
+#            send_message(vk, user_id, get_response(user_id, 'no_next_class', name=name), get_keyboard(lang))
+#        return
+#    
+#    # My tasks
+#    if any(word in text_lower for word in ['tasks', 'task', 'deadlines', 'задачи', 'дела']):
+#        tasks = get_tasks(user_id)
+#        if tasks:
+#            task_list = ""
+#            for tid, task, due_date, days, priority in tasks:
+#                dt = datetime.strptime(due_date, "%Y-%m-%d %H:%M")
+#                priority_icon = "🔴" if priority == 'high' else "🟡" if priority == 'medium' else "🟢"
+#                task_list += f"{priority_icon} **{task}**\n   ⏰ {dt.strftime('%d.%m.%Y %H:%M')}\n\n"
+#            send_message(vk, user_id, get_response(user_id, 'tasks_header', name=name, tasks=task_list), get_keyboard(lang))
+#        else:
+#            send_message(vk, user_id, get_response(user_id, 'no_tasks', name=name), get_keyboard(lang))
+#        return
+#    
+#    # Complete task
+#    done_match = re.search(r'(?:done|finished|complete|готово|сделал|выполнил)\s+(.+?)(?:\.|$)', text, re.IGNORECASE)
+#    if done_match:
+#        task_name = done_match.group(1).strip()
+#        tasks = get_tasks(user_id)
+#        for tid, task, due_date, days, priority in tasks:
+#            if task_name.lower() in task.lower() or task.lower() in task_name.lower():
+#                complete_task(tid, user_id)
+#                send_message(vk, user_id, get_response(user_id, 'task_completed', name=name, task=task), get_keyboard(lang))
+#                return
+#        send_message(vk, user_id, get_response(user_id, 'no_task_found', name=name, task=task_name), get_keyboard(lang))
+#        return
+#    
+#    # Study logging
+#    study_match = re.search(r'(?:study|studied|учился|занимался)\s+(\d+)\s+(?:minutes?|min|минут?)\s+(?:for\s+)?(.+?)(?:\.|$)', text, re.IGNORECASE)
+#    if study_match:
+#        duration = int(study_match.group(1))
+#        subject = study_match.group(2).strip()
+#        add_study_session(user_id, subject, duration)
+#        send_message(vk, user_id, f"📝 " + ("Great job! I've logged {duration} minutes for {subject}!" if lang == 'en' else f"Отлично! Записал {duration} минут учёбы по {subject}!") + " 📊 Check 'Statistics' to see your progress!", get_keyboard(lang))
+#        return
+#    
+#    # Help
+#    if any(word in text_lower for word in ['help', 'помощь', 'what can you do']):
+#        send_message(vk, user_id, get_response(user_id, 'help_text', name=name), get_keyboard(lang))
+#        return
+#    
+#    # Thanks
+#    if any(word in text_lower for word in ['thanks', 'thank you', 'спасибо']):
+#        send_message(vk, user_id, get_response(user_id, 'thanks', name=name), get_keyboard(lang))
+#        return
+#    
+#    # Time
+#    if any(word in text_lower for word in ['time', 'время', 'который час']):
+#        now = datetime.now(TIMEZONE)
+#        send_message(vk, user_id, get_response(user_id, 'time', name=name, time=now.strftime('%H:%M')), get_keyboard(lang))
+#        return
+#    
+#    # Joke
+#    if any(word in text_lower for word in ['joke', 'шутка']):
+#        jokes = {
+#            'en': ["Why don't scientists trust atoms? They make up everything!", "What do you call a fake noodle? An impasta!", "Why did the scarecrow win an award? He was outstanding in his field!"],
+#            'ru': ["Почему программисты путают Хэллоуин с Рождеством? 31 Oct = 25 Dec!", "Как называется ложная лапша? Паста-фальшивка!", "Что говорит один ноль другому? Без тебя я просто пустое место!"]
+#        }
+#        send_message(vk, user_id, get_response(user_id, 'joke', name=name, joke=random.choice(jokes[lang])), get_keyboard(lang))
+#        return
+#    
+#    # Greeting
+#    if any(word in text_lower for word in ['hello', 'hi', 'hey', 'привет']):
+#        send_message(vk, user_id, get_response(user_id, 'greeting', name=name), get_keyboard(lang))
+#        return
+#    
+#    # Default response
+#    send_message(vk, user_id, get_response(user_id, 'unknown', name=name), get_keyboard(lang))
+#
+## ========== REMINDER SYSTEM ==========
+#def check_reminders(vk):
+#    try:
+#        conn = sqlite3.connect("assistant.db")
+#        c = conn.cursor()
+#        now = datetime.now(TIMEZONE)
+#        current_day = now.weekday()
+#        
+#        c.execute("SELECT DISTINCT user_id FROM schedule")
+#        users = c.fetchall()
+#        
+#        for (user_id,) in users:
+#            lang = get_user_language(user_id) or 'en'
+#            name = get_user_name(user_id) or "friend"
+#            
+#            c.execute("SELECT subject, start_time FROM schedule WHERE user_id = ? AND day = ?", (user_id, current_day))
+#            classes = c.fetchall()
+#            
+#            for subject, start_time in classes:
+#                hour, minute = map(int, start_time.split(':'))
+#                class_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+#                minutes_until = (class_time - now).total_seconds() / 60
+#                
+#                if 60 <= minutes_until <= 90:
+#                    key = f"reminder_{user_id}_{current_day}_{start_time}"
+#                    c.execute("SELECT sent FROM reminders WHERE key = ?", (key,))
+#                    if not c.fetchone():
+#                        msg = get_response(user_id, 'reminder', name=name, subject=subject, time=start_time, minutes=int(minutes_until))
+#                        send_message(vk, user_id, msg, get_keyboard(lang))
+#                        c.execute("INSERT INTO reminders (key, sent) VALUES (?, ?)", (key, 1))
+#                        conn.commit()
+#        
+#        conn.close()
+#    except Exception as e:
+#        logging.error(f"Reminder error: {e}")
+#
+## ========== MAIN ==========
+#scheduler = BackgroundScheduler()
+#
+#def main():
+#    print("=" * 60)
+#    print("🤖 Personal Assistant Bot - English & Russian Support")
+#    print("=" * 60)
+#    print("✅ Features:")
+#    print("   • English & Russian languages (auto-detects)")
+#    print("   • Schedule management")
+#    print("   • Task tracking with priorities")
+#    print("   • Class attendance tracking")
+#    print("   • Study time logging")
+#    print("   • Complete statistics")
+#    print("   • 60-90 minute reminders")
+#    print("   • ICS calendar import")
+#    print("=" * 60)
+#    
+#    try:
+#        vk_session = vk_api.VkApi(token=VK_TOKEN)
+#        vk = vk_session.get_api()
+#        
+#        scheduler.add_job(lambda: check_reminders(vk), 'interval', minutes=5)
+#        scheduler.start()
+#        
+#        print("✅ Bot is running!")
+#        print("💬 I speak English and Russian (auto-detects your language)")
+#        print("📥 Send me an ICS link to import your schedule")
+#        print("=" * 60 + "\n")
+#        
+#        longpoll = VkBotLongPoll(vk_session, GROUP_ID)
+#        
+#        for event in longpoll.listen():
+#            if event.type == VkBotEventType.MESSAGE_NEW:
+#                try:
+#                    msg = event.object.message
+#                    user_id = msg["from_id"]
+#                    text = msg.get("text", "").strip()
+#                    attachments = msg.get("attachments", [])
+#                    
+#                    # Handle file uploads
+#                    ics_files = [att for att in attachments if att["type"] == "doc" and att["doc"]["title"].endswith(".ics")]
+#                    if ics_files:
+#                        url = ics_files[0]["doc"]["url"]
+#                        resp = requests.get(url)
+#                        if resp.status_code == 200:
+#                            lang = detect_language(text)
+#                            set_user_language(user_id, lang)
+#                            name = get_user_name(user_id) or "friend"
+#                            count = import_ics_from_link(user_id, url)
+#                            if count > 0:
+#                                send_message(vk, user_id, get_response(user_id, 'file_import_success', count=count, name=name), get_keyboard(lang))
+#                            else:
+#                                send_message(vk, user_id, get_response(user_id, 'file_import_fail', name=name), get_keyboard(lang))
+#                        continue
+#                    
+#                    # Handle button payloads
+#                    payload = msg.get("payload")
+#                    if payload:
+#                        try:
+#                            payload = json.loads(payload)
+#                            if payload.get("cmd") == "complete":
+#                                complete_task(payload["tid"], user_id)
+#                                lang = get_user_language(user_id) or 'en'
+#                                name = get_user_name(user_id) or "friend"
+#                                send_message(vk, user_id, get_response(user_id, 'task_completed', name=name, task="task"), get_keyboard(lang))
+#                        except:
+#                            pass
+#                        continue
+#                    
+#                    # Handle messages
+#                    if text:
+#                        handle_message(vk, user_id, text, attachments)
+#                        
+#                except Exception as e:
+#                    logging.error(f"Error: {e}")
+#                    
+#    except KeyboardInterrupt:
+#        print("\n🛑 Bot stopped")
+#        scheduler.shutdown()
+#    except Exception as e:
+#        print(f"\n❌ Error: {e}")
+#
+#if __name__ == "__main__":
+#    main()
+#
+
+
+
+
 import logging
 import sqlite3
 import json
+import threading
 import requests
 from datetime import datetime, timedelta
 import vk_api
@@ -7588,13 +8548,33 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
 import re
 import random
+import hashlib
+import time
+from threading import Lock
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
+from functools import lru_cache
 
 # ========== CONFIGURATION ==========
 VK_TOKEN = "vk1.a.eZvEbyVQo2aLD4K-r_7DxudJLQ4iNke42CLOnxo-ewzkJhDCjgY-FFImW2JeNulCAByv9bzkSuo_VXZFEV1GbMGoTfjD_TlDUV_pfIIfXU2eJvNsYIVFvVRa7OQxAhzGJPle69aDCxH7jYlu-LbbfSLM-9ZVDiOkmo3zSdgiWYegoSqKJqtGAGoyldsJYC79Fc9up1aNsvk3uJ3NZaE6Xg"
 GROUP_ID = 237363984
 TIMEZONE = pytz.timezone("Asia/Novosibirsk")
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Performance settings
+CACHE_TTL = 300  # 5 minutes cache
+MAX_WORKERS = 10
+DB_POOL_SIZE = 5
+BATCH_SIZE = 100
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('bot.log'),
+        logging.StreamHandler()
+    ]
+)
 
 # ========== MULTILINGUAL RESPONSES ==========
 RESPONSES = {
@@ -7644,6 +8624,11 @@ RESPONSES = {
 ⏰ **REMINDERS**
 • Automatic 60-90 min before class
 
+🌐 **LANGUAGE**
+• /lang en - English
+• /lang ru - Russian  
+• /lang zh - Chinese
+
 🎯 **PRO TIP:** Track your attendance and tasks to see your productivity score!
 
 What would you like help with? 😊""",
@@ -7663,7 +8648,12 @@ What would you like help with? 😊""",
         'task_format': "Format: /task 'Task name' YYYY-MM-DD HH:MM days [priority]",
         'no_task_found': "Hmm, I couldn't find a task named '{task}', {name}. Can you check the name?",
         'file_import_success': "🎉 Success! I've imported {count} classes from your file, {name}!",
-        'file_import_fail': "❌ Couldn't import from that file, {name}. Make sure it's a valid ICS file."
+        'file_import_fail': "❌ Couldn't import from that file, {name}. Make sure it's a valid ICS file.",
+        'language_changed': "🌐 Language changed to English! All messages will now be in English.",
+        'current_language': "🌐 Current language: English\n\nAvailable: /lang en, /lang ru, /lang zh",
+        'study_logged': "📚 Great job, {name}! Logged {minutes} minutes studying '{subject}'. Keep it up!",
+        'first_class_alarm': "⏰ **FIRST CLASS SOON, {name}!**\n\n📚 {subject}\n🕐 at {time}\n⏱️ Starts in {minutes} minutes!\n\nGet ready and don't be late! 📖",
+        'deadline_reminder': "📝 **DEADLINE REMINDER, {name}!**\n\nTask: {task}\n⏰ Due: {due_date}\n{days_left} day(s) remaining!\n\nDon't forget to complete it! 🎯"
     },
     'ru': {
         'ask_name': "Привет! 👋 Я твой персональный помощник. Как тебя зовут?",
@@ -7711,6 +8701,11 @@ What would you like help with? 😊""",
 ⏰ **НАПОМИНАНИЯ**
 • Автоматически за 60-90 минут до пары
 
+🌐 **ЯЗЫК**
+• /lang en - English
+• /lang ru - Русский
+• /lang zh - 中文
+
 🎯 **СОВЕТ:** Отмечай посещаемость и задачи, чтобы видеть свой прогресс!
 
 Чем могу помочь? 😊""",
@@ -7730,168 +8725,356 @@ What would you like help with? 😊""",
         'task_format': "Формат: /task 'Название' ГГГГ-ММ-ДД ЧЧ:ММ дни [приоритет]",
         'no_task_found': "Хм, я не могу найти задачу '{task}', {name}. Проверь название.",
         'file_import_success': "🎉 Отлично! Я импортировал {count} пар(ы) из твоего файла, {name}!",
-        'file_import_fail': "❌ Не удалось импортировать из файла, {name}. Убедись, что это правильный ICS файл."
+        'file_import_fail': "❌ Не удалось импортировать из файла, {name}. Убедись, что это правильный ICS файл.",
+        'language_changed': "🌐 Язык изменён на Русский! Все сообщения теперь на русском.",
+        'current_language': "🌐 Текущий язык: Русский\n\nДоступно: /lang en, /lang ru, /lang zh",
+        'study_logged': "📚 Отлично, {name}! Записал {minutes} минут учёбы по '{subject}'. Так держать!",
+        'first_class_alarm': "⏰ **СКОРО ПЕРВАЯ ПАРА, {name}!**\n\n📚 {subject}\n🕐 в {time}\n⏱️ Через {minutes} минут!\n\nГотовься и не опаздывай! 📖",
+        'deadline_reminder': "📝 **НАПОМИНАНИЕ О ДЕДЛАЙНЕ, {name}!**\n\nЗадача: {task}\n⏰ Срок: {due_date}\nОсталось {days_left} дн.\n\nНе забудь выполнить! 🎯"
+    },
+    'zh': {
+        'ask_name': "你好！👋 我是你的个人助理。你叫什么名字？",
+        'got_name': "很高兴认识你，{name}！👋 我会帮你管理课程、任务和学习进度！",
+        'schedule_today': "📅 **今日课程表，{name}：**\n\n{classes}\n💡 *课后点击'✅ 标记'来记录出勤！*",
+        'schedule_tomorrow': "📅 **明日课程表，{name}：**\n\n{classes}",
+        'no_classes': "🎉 今天没课，{name}！自由的一天！",
+        'no_classes_tomorrow': "🎉 明天没课，{name}！享受你的休息日！",
+        'next_class': "⏰ {name}，下一节课是 **{subject}** 在 {time}。大约 {minutes} 分钟后开始！",
+        'no_next_class': "🎉 今天的课都上完了，{name}！该放松了！",
+        'tasks_header': "📋 **你的任务列表，{name}：**\n\n{tasks}\n💡 完成任务时说'完成 [任务名]'\n📊 查看'统计'了解你的进度！",
+        'no_tasks': "✅ 太棒了，{name}！没有未完成的任务。你都完成了！🎉",
+        'task_added': "✅ 收到，{name}！已添加任务'{task}'。我会提前{days}天提醒你。",
+        'task_completed': "🎉 干得好，{name}！已将'{task}'标记为完成！\n\n📊 查看'统计'了解你的最新进度！",
+        'import_success': "🎉 成功！已导入 {count} 节课到你的课程表，{name}！\n\n✅ 我会在每节课前提醒你。\n📅 问'今天有什么课？'查看课程表！\n📊 查看'统计'了解你的进度！",
+        'import_fail': "❌ 无法从该链接导入，{name}。请确保是有效的ICS文件。",
+        'import_instructions': "📥 **如何导入课程表，{name}：**\n\n1️⃣ 发送ICS链接（来自学校网站）\n2️⃣ 使用命令：/ics [链接]\n3️⃣ 附加.ics文件\n\n我会自动添加所有课程并提前提醒你！⏰",
+        'attendance_prompt': "📚 你上了哪节课，{name}？\n\n{classes}\n\n回复课程编号或名称。",
+        'no_classes_attendance': "你今天没有课，{name}！📭",
+        'attendance_marked': "✅ 太好了！已将'{class_name}'标记为已出勤，{name}！保持好出勤！📚",
+        'attendance_error': "❌ 找不到名为'{class_name}'的课程，{name}。请检查名称后重试。",
+        'help_text': """🤖 **我能为你做什么，{name}：**
+
+📅 **课程表**
+• "今天有什么课？" - 今日课程
+• "明天有什么课？" - 明日课程
+• "下节课是什么？" - 下节课
+• 发送ICS链接 - 导入课程表
+
+✅ **出勤**
+• "标记出勤" - 记录出勤
+
+📝 **任务**
+• "我的任务" - 查看任务
+• /task "任务名" 2025-12-20 23:59 7 [优先级]
+• "完成 [任务名]" - 标记完成
+
+📊 **统计**
+• "统计" - 完整进度报告
+
+📥 **导入课程表**
+• 发送ICS链接
+• 使用 /ics [链接]
+
+⏰ **提醒**
+• 课前60-90分钟自动提醒
+
+🌐 **语言**
+• /lang en - English
+• /lang ru - Русский
+• /lang zh - 中文
+
+🎯 **提示：** 记录出勤和任务来查看你的生产力得分！
+
+需要什么帮助？😊""",
+        'stats_header': "📊 **你的学习统计，{name}！** 📊",
+        'task_mastery': "📝 **任务完成情况**\n• ✅ 已完成任务：{completed}\n• ⏳ 待办任务：{pending}\n• 🔴 高优先级完成：{high}\n• 🎯 生产力得分：{score}%\n   [{bar}]",
+        'attendance_section': "📚 **课程出勤**\n• 📖 总课程：{total}\n• ✅ 已出勤：{attended}\n• ❌ 缺勤：{missed}\n• 📈 出勤率：{rate}%\n   [{bar}]",
+        'study_section': "⏱️ **学习时间**\n• 📅 今日：{today} 分钟\n• 📆 本周：{week} 分钟\n• 🏆 总计：{total_study} 分钟\n• 💪 日均：{avg} 分钟/天",
+        'motivation': "💡 **激励语**\n{message}",
+        'attendance_tip': "📌 *提示：课后点击'✅ 标记'来记录出勤！*",
+        'thanks': "不客气，{name}！😊 还需要什么帮助？查看'统计'了解你的进度！",
+        'time': "🕐 现在是 {time}，{name}。今天有什么安排？",
+        'joke': "😂 给你讲个笑话，{name}：{joke}",
+        'greeting': "你好 {name}！👋 很高兴见到你！查看'统计'了解你的进度！🎉",
+        'unknown': "有意思，{name}！我能怎么帮你？试试'统计'了解你的进度！",
+        'reminder': "⏰ **课程提醒，{name}！**\n\n📚 {subject}\n🕐 在 {time}\n⏱️ {minutes} 分钟后开始！\n\n准备好！📖\n\n✅ 课后记得标记出勤！",
+        'wrong_format': "格式：/task '任务名' 2025-12-20 23:59 7 [优先级]",
+        'task_format': "格式：/task '任务名' 年-月-日 时:分 天数 [优先级]",
+        'no_task_found': "嗯，我找不到名为'{task}'的任务，{name}。请检查名称。",
+        'file_import_success': "🎉 成功！已从你的文件导入 {count} 节课，{name}！",
+        'file_import_fail': "❌ 无法从该文件导入，{name}。请确保是有效的ICS文件。",
+        'language_changed': "🌐 语言已切换为中文！所有消息将使用中文。",
+        'current_language': "🌐 当前语言：中文\n\n可用：/lang en, /lang ru, /lang zh",
+        'study_logged': "📚 太棒了，{name}！记录了学习'{subject}' {minutes}分钟。继续加油！",
+        'first_class_alarm': "⏰ **第一节课即将开始，{name}！**\n\n📚 {subject}\n🕐 在 {time}\n⏱️ {minutes} 分钟后开始！\n\n准备好，不要迟到！📖",
+        'deadline_reminder': "📝 **截止日期提醒，{name}！**\n\n任务：{task}\n⏰ 截止：{due_date}\n还剩 {days_left} 天！\n\n不要忘记完成！🎯"
     }
 }
 
-# ========== DATABASE SETUP ==========
-def init_db():
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
-    
-    # Users table
-    c.execute("""CREATE TABLE IF NOT EXISTS users (
-        vk_id INTEGER PRIMARY KEY,
-        name TEXT DEFAULT '',
-        language TEXT DEFAULT 'en',
-        reminder_offset INTEGER DEFAULT 75,
-        join_date DATETIME DEFAULT CURRENT_TIMESTAMP
-    )""")
-    
-    # Schedule table
-    c.execute("""CREATE TABLE IF NOT EXISTS schedule (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        subject TEXT,
-        day INTEGER,
-        start_time TEXT,
-        end_time TEXT,
-        location TEXT,
-        teacher TEXT
-    )""")
-    
-    # Class attendance tracking
-    c.execute("""CREATE TABLE IF NOT EXISTS class_attendance (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        class_name TEXT,
-        date DATE,
-        attended INTEGER DEFAULT 0,
-        missed INTEGER DEFAULT 0
-    )""")
-    
-    # Tasks table
-    c.execute("""CREATE TABLE IF NOT EXISTS tasks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        task TEXT,
-        due_date TEXT,
-        remind_days INTEGER,
-        priority TEXT DEFAULT 'normal',
-        category TEXT DEFAULT 'general',
-        done INTEGER DEFAULT 0,
-        completed_date DATETIME
-    )""")
-    
-    # Study sessions
-    c.execute("""CREATE TABLE IF NOT EXISTS study_sessions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        subject TEXT,
-        duration INTEGER,
-        date TEXT
-    )""")
-    
-    # Daily statistics
-    c.execute("""CREATE TABLE IF NOT EXISTS daily_stats (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        date DATE,
-        tasks_completed INTEGER DEFAULT 0,
-        classes_attended INTEGER DEFAULT 0,
-        study_minutes INTEGER DEFAULT 0
-    )""")
-    
-    # Reminders
-    c.execute("""CREATE TABLE IF NOT EXISTS reminders (
-        key TEXT PRIMARY KEY,
-        sent INTEGER DEFAULT 1,
-        reminder_time DATETIME DEFAULT CURRENT_TIMESTAMP
-    )""")
-    
-    # Conversations
-    c.execute("""CREATE TABLE IF NOT EXISTS conversations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        message TEXT,
-        response TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )""")
-    
-    conn.commit()
-    
-    # Fix existing tables - add missing columns
-    try:
-        c.execute("PRAGMA table_info(tasks)")
-        columns = [col[1] for col in c.fetchall()]
-        if 'priority' not in columns:
-            c.execute("ALTER TABLE tasks ADD COLUMN priority TEXT DEFAULT 'normal'")
-        if 'category' not in columns:
-            c.execute("ALTER TABLE tasks ADD COLUMN category TEXT DEFAULT 'general'")
-        if 'completed_date' not in columns:
-            c.execute("ALTER TABLE tasks ADD COLUMN completed_date DATETIME")
-        
-        c.execute("PRAGMA table_info(schedule)")
-        schedule_cols = [col[1] for col in c.fetchall()]
-        if 'location' not in schedule_cols:
-            c.execute("ALTER TABLE schedule ADD COLUMN location TEXT DEFAULT ''")
-        if 'teacher' not in schedule_cols:
-            c.execute("ALTER TABLE schedule ADD COLUMN teacher TEXT DEFAULT ''")
-            
-        c.execute("PRAGMA table_info(reminders)")
-        rem_cols = [col[1] for col in c.fetchall()]
-        if 'reminder_time' not in rem_cols and 'timestamp' in rem_cols:
-            c.execute("ALTER TABLE reminders RENAME COLUMN timestamp TO reminder_time")
-    except Exception as e:
-        logging.warning(f"Schema update warning: {e}")
-    
-    conn.commit()
-    conn.close()
-    logging.info("Database initialized")
+# Jokes and motivations
+JOKES = {
+    'en': [
+        "Why don't scientists trust atoms? Because they make up everything!",
+        "What do you call a fake noodle? An impasta!",
+        "Why did the scarecrow win an award? He was outstanding in his field!",
+        "What do you call a bear with no teeth? A gummy bear!",
+        "Why don't eggs tell jokes? They'd crack each other up!"
+    ],
+    'ru': [
+        "Почему программисты путают Хэллоуин с Рождеством? 31 Oct = 25 Dec!",
+        "Как называется ложная лапша? Паста-фальшивка!",
+        "Что говорит один ноль другому? Без тебя я просто пустое место!",
+        "Почему студенты любят овощи? Потому что они всегда есть!",
+        "Как называется медведь без зубов? Жевательный мишка!"
+    ],
+    'zh': [
+        "为什么科学家不相信原子？因为它们构成了一切！",
+        "什么叫假面条？假面食！",
+        "稻草人为什么得奖？因为他在田里表现出色！",
+        "没有牙齿的熊叫什么？软糖熊！",
+        "鸡蛋为什么不讲笑话？因为它们会笑裂！"
+    ]
+}
 
-init_db()
+MOTIVATIONS = {
+    'en': [
+        "You're doing amazing! Keep pushing forward! 💪",
+        "Every step counts! Progress over perfection! 🌟",
+        "Your dedication is inspiring! 🎯",
+        "Small daily improvements lead to big results! 📈",
+        "You've got this! Keep up the great work! 🚀",
+        "Consistency is key, and you're crushing it! 🔑",
+        "Today's efforts are tomorrow's success! ⭐"
+    ],
+    'ru': [
+        "У тебя отлично получается! Продолжай в том же духе! 💪",
+        "Каждый шаг имеет значение! Прогресс важнее совершенства! 🌟",
+        "Твоя целеустремлённость вдохновляет! 🎯",
+        "Маленькие ежедневные улучшения ведут к большим результатам! 📈",
+        "У тебя всё получится! Продолжай в том же духе! 🚀",
+        "Постоянство - ключ к успеху, и у тебя отлично получается! 🔑",
+        "Сегодняшние усилия - завтрашний успех! ⭐"
+    ],
+    'zh': [
+        "你做得太棒了！继续加油！💪",
+        "每一步都很重要！进步胜于完美！🌟",
+        "你的努力很鼓舞人心！🎯",
+        "小小的日常改进会带来巨大的成果！📈",
+        "你能行的！继续保持！🚀",
+        "坚持是关键，而你做得很好！🔑",
+        "今天的努力是明天的成功！⭐"
+    ]
+}
+
+# ========== DATABASE MANAGER WITH CONNECTION POOL ==========
+class DatabaseManager:
+    def __init__(self, db_path="assistant.db"):
+        self.db_path = db_path
+        self._local = threading.local()
+        self._lock = Lock()
+        self._init_db()
+    
+    def _get_connection(self):
+        if not hasattr(self._local, 'conn') or self._local.conn is None:
+            self._local.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            self._local.conn.row_factory = sqlite3.Row
+            self._local.conn.execute("PRAGMA journal_mode=WAL")
+            self._local.conn.execute("PRAGMA cache_size=-20000")  # 20MB cache
+        return self._local.conn
+    
+    def _init_db(self):
+        conn = self._get_connection()
+        c = conn.cursor()
+        
+        # Users table
+        c.execute("""CREATE TABLE IF NOT EXISTS users (
+            vk_id INTEGER PRIMARY KEY,
+            name TEXT DEFAULT '',
+            language TEXT DEFAULT 'en',
+            reminder_offset INTEGER DEFAULT 75,
+            join_date DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""")
+        
+        # Schedule table
+        c.execute("""CREATE TABLE IF NOT EXISTS schedule (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            subject TEXT,
+            day INTEGER,
+            start_time TEXT,
+            end_time TEXT,
+            location TEXT,
+            teacher TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(vk_id)
+        )""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_schedule_user_day ON schedule(user_id, day)")
+        
+        # Class attendance tracking
+        c.execute("""CREATE TABLE IF NOT EXISTS class_attendance (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            class_name TEXT,
+            date TEXT,
+            attended INTEGER DEFAULT 0,
+            missed INTEGER DEFAULT 0,
+            UNIQUE(user_id, class_name, date)
+        )""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_attendance_user_date ON class_attendance(user_id, date)")
+        
+        # Tasks table
+        c.execute("""CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            task TEXT,
+            due_date TEXT,
+            remind_days INTEGER,
+            priority TEXT DEFAULT 'normal',
+            category TEXT DEFAULT 'general',
+            done INTEGER DEFAULT 0,
+            completed_date DATETIME
+        )""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_tasks_user_done ON tasks(user_id, done)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date)")
+        
+        # Study sessions
+        c.execute("""CREATE TABLE IF NOT EXISTS study_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            subject TEXT,
+            duration INTEGER,
+            date TEXT
+        )""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_study_user_date ON study_sessions(user_id, date)")
+        
+        # Daily statistics
+        c.execute("""CREATE TABLE IF NOT EXISTS daily_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            date TEXT,
+            tasks_completed INTEGER DEFAULT 0,
+            classes_attended INTEGER DEFAULT 0,
+            study_minutes INTEGER DEFAULT 0,
+            UNIQUE(user_id, date)
+        )""")
+        
+        # Reminders
+        c.execute("""CREATE TABLE IF NOT EXISTS reminders (
+            key TEXT PRIMARY KEY,
+            sent INTEGER DEFAULT 1,
+            reminder_time DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""")
+        
+        # Conversations
+        c.execute("""CREATE TABLE IF NOT EXISTS conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            message TEXT,
+            response TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""")
+        
+        conn.commit()
+        logging.info("Database initialized with indexes")
+    
+    def execute(self, query, params=()):
+        conn = self._get_connection()
+        with self._lock:
+            return conn.execute(query, params)
+    
+    def executemany(self, query, params_list):
+        conn = self._get_connection()
+        with self._lock:
+            return conn.executemany(query, params_list)
+    
+    def commit(self):
+        conn = self._get_connection()
+        conn.commit()
+    
+    def fetchone(self, query, params=()):
+        return self.execute(query, params).fetchone()
+    
+    def fetchall(self, query, params=()):
+        return self.execute(query, params).fetchall()
+    
+    def close(self):
+        if hasattr(self._local, 'conn') and self._local.conn:
+            self._local.conn.close()
+            self._local.conn = None
+
+# ========== CACHE MANAGER ==========
+class CacheManager:
+    def __init__(self, ttl=CACHE_TTL):
+        self.cache = {}
+        self.ttl = ttl
+        self._lock = Lock()
+    
+    def get(self, key):
+        with self._lock:
+            if key in self.cache:
+                data, timestamp = self.cache[key]
+                if time.time() - timestamp < self.ttl:
+                    return data
+                else:
+                    del self.cache[key]
+        return None
+    
+    def set(self, key, value):
+        with self._lock:
+            self.cache[key] = (value, time.time())
+    
+    def invalidate(self, key=None):
+        with self._lock:
+            if key:
+                self.cache.pop(key, None)
+            else:
+                self.cache.clear()
+
+# ========== GLOBAL INSTANCES ==========
+db = DatabaseManager()
+cache = CacheManager()
+executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
 
 # ========== HELPER FUNCTIONS ==========
 def detect_language(text):
     if not text:
         return 'en'
-    cyrillic = sum(1 for c in text if '\u0400' <= c <= '\u04FF')
-    if cyrillic > len(text) * 0.1:
+    
+    # Check for Chinese characters
+    chinese_count = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+    if chinese_count > len(text) * 0.1:
+        return 'zh'
+    
+    # Check for Cyrillic
+    cyrillic_count = sum(1 for c in text if '\u0400' <= c <= '\u04FF')
+    if cyrillic_count > len(text) * 0.1:
         return 'ru'
+    
     return 'en'
 
+@lru_cache(maxsize=1000)
+def get_user_name_cached(user_id):
+    result = db.fetchone("SELECT name FROM users WHERE vk_id = ?", (user_id,))
+    return result['name'] if result else None
+
 def get_user_name(user_id):
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
-    c.execute("SELECT name FROM users WHERE vk_id = ?", (user_id,))
-    row = c.fetchone()
-    conn.close()
-    return row[0] if row and row[0] else None
+    return get_user_name_cached(user_id)
 
 def set_user_name(user_id, name):
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO users (vk_id, name) VALUES (?, ?)", (user_id, name))
-    conn.commit()
-    conn.close()
+    db.execute("INSERT OR REPLACE INTO users (vk_id, name) VALUES (?, ?)", (user_id, name))
+    db.commit()
+    cache.invalidate(f"user_{user_id}")
+    get_user_name_cached.cache_clear()
 
 def get_user_language(user_id):
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
-    c.execute("SELECT language FROM users WHERE vk_id = ?", (user_id,))
-    row = c.fetchone()
-    conn.close()
-    return row[0] if row else 'en'
+    result = db.fetchone("SELECT language FROM users WHERE vk_id = ?", (user_id,))
+    return result['language'] if result else 'en'
 
 def set_user_language(user_id, lang):
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
-    c.execute("UPDATE users SET language = ? WHERE vk_id = ?", (lang, user_id))
-    conn.commit()
-    conn.close()
+    db.execute("UPDATE users SET language = ? WHERE vk_id = ?", (lang, user_id))
+    db.commit()
 
 def get_response(user_id, key, **kwargs):
-    lang = get_user_language(user_id) or 'en'
+    lang = get_user_language(user_id)
     responses = RESPONSES.get(lang, RESPONSES['en'])
     template = responses.get(key, key)
     try:
@@ -7899,178 +9082,194 @@ def get_response(user_id, key, **kwargs):
     except:
         return template
 
+def create_progress_bar(percentage, length=10):
+    filled = int(percentage / 100 * length)
+    return "█" * filled + "░" * (length - filled)
+
 # ========== SCHEDULE FUNCTIONS ==========
 def add_class(user_id, subject, day, start, end, location='', teacher=''):
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
-    c.execute("INSERT INTO schedule (user_id, subject, day, start_time, end_time, location, teacher) VALUES (?,?,?,?,?,?,?)",
-              (user_id, subject, day, start, end, location, teacher))
-    conn.commit()
-    conn.close()
+    db.execute(
+        "INSERT INTO schedule (user_id, subject, day, start_time, end_time, location, teacher) VALUES (?,?,?,?,?,?,?)",
+        (user_id, subject, day, start, end, location, teacher)
+    )
+    db.commit()
+    cache.invalidate(f"schedule_{user_id}")
 
 def get_today_classes(user_id):
+    cache_key = f"schedule_today_{user_id}"
+    cached = cache.get(cache_key)
+    if cached:
+        return cached
+    
     today = datetime.now(TIMEZONE).weekday()
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
-    c.execute("SELECT subject, start_time, end_time, location, teacher FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time", 
-              (user_id, today))
-    rows = c.fetchall()
-    conn.close()
+    rows = db.fetchall(
+        "SELECT subject, start_time, end_time, location, teacher FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time",
+        (user_id, today)
+    )
+    cache.set(cache_key, rows)
     return rows
 
 def get_tomorrow_classes(user_id):
     tomorrow = (datetime.now(TIMEZONE).weekday() + 1) % 7
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
-    c.execute("SELECT subject, start_time, end_time FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time", 
-              (user_id, tomorrow))
-    rows = c.fetchall()
-    conn.close()
-    return rows
+    return db.fetchall(
+        "SELECT subject, start_time, end_time, location, teacher FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time",
+        (user_id, tomorrow)
+    )
 
 def get_next_class(user_id):
     now = datetime.now(TIMEZONE)
     current_day = now.weekday()
     current_time = now.strftime("%H:%M")
     
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
-    c.execute("SELECT subject, day, start_time FROM schedule WHERE user_id = ? ORDER BY day, start_time", (user_id,))
-    classes = c.fetchall()
-    conn.close()
+    rows = db.fetchall(
+        "SELECT subject, day, start_time FROM schedule WHERE user_id = ? ORDER BY day, start_time",
+        (user_id,)
+    )
     
-    for subject, day, start in classes:
-        if day > current_day or (day == current_day and start > current_time):
-            return subject, start
-    if classes:
-        return classes[0][0], classes[0][2]
+    for row in rows:
+        if row['day'] > current_day or (row['day'] == current_day and row['start_time'] > current_time):
+            return row['subject'], row['start_time']
+    
+    if rows:
+        return rows[0]['subject'], rows[0]['start_time']
     return None, None
 
 def get_class_count(user_id):
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM schedule WHERE user_id = ?", (user_id,))
-    count = c.fetchone()[0]
-    conn.close()
-    return count
+    result = db.fetchone("SELECT COUNT(*) as count FROM schedule WHERE user_id = ?", (user_id,))
+    return result['count']
+
+def delete_class(user_id, class_id):
+    db.execute("DELETE FROM schedule WHERE id = ? AND user_id = ?", (class_id, user_id))
+    db.commit()
+    cache.invalidate(f"schedule_{user_id}")
 
 # ========== ATTENDANCE FUNCTIONS ==========
 def mark_attended(user_id, class_name):
     date = datetime.now(TIMEZONE).strftime("%Y-%m-%d")
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
     
-    c.execute("SELECT id FROM class_attendance WHERE user_id = ? AND class_name = ? AND date = ?", 
-              (user_id, class_name, date))
-    existing = c.fetchone()
+    db.execute(
+        """INSERT INTO class_attendance (user_id, class_name, date, attended, missed) 
+           VALUES (?, ?, ?, 1, 0) 
+           ON CONFLICT(user_id, class_name, date) 
+           DO UPDATE SET attended = 1, missed = 0""",
+        (user_id, class_name, date)
+    )
     
-    if existing:
-        c.execute("UPDATE class_attendance SET attended = 1, missed = 0 WHERE id = ?", (existing[0],))
-    else:
-        c.execute("INSERT INTO class_attendance (user_id, class_name, date, attended, missed) VALUES (?,?,?,1,0)",
-                  (user_id, class_name, date))
+    db.execute(
+        """INSERT INTO daily_stats (user_id, date, classes_attended) 
+           VALUES (?, ?, 1) 
+           ON CONFLICT(user_id, date) 
+           DO UPDATE SET classes_attended = classes_attended + 1""",
+        (user_id, date)
+    )
     
-    c.execute("SELECT id FROM daily_stats WHERE user_id = ? AND date = ?", (user_id, date))
-    daily = c.fetchone()
-    if daily:
-        c.execute("UPDATE daily_stats SET classes_attended = classes_attended + 1 WHERE id = ?", (daily[0],))
-    else:
-        c.execute("INSERT INTO daily_stats (user_id, date, classes_attended) VALUES (?,?,1)", (user_id, date))
+    db.commit()
+    cache.invalidate(f"attendance_{user_id}")
+
+def get_attendance_stats(user_id):
+    cache_key = f"attendance_stats_{user_id}"
+    cached = cache.get(cache_key)
+    if cached:
+        return cached
     
-    conn.commit()
-    conn.close()
+    attended = db.fetchone("SELECT COUNT(*) as count FROM class_attendance WHERE user_id = ? AND attended = 1", (user_id,))
+    missed = db.fetchone("SELECT COUNT(*) as count FROM class_attendance WHERE user_id = ? AND missed = 1", (user_id,))
+    result = (attended['count'], missed['count'])
+    cache.set(cache_key, result)
+    return result
 
 # ========== TASK FUNCTIONS ==========
 def add_task(user_id, task, due_date, remind_days, priority='normal'):
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
-    c.execute("INSERT INTO tasks (user_id, task, due_date, remind_days, priority, done) VALUES (?,?,?,?,?,0)",
-              (user_id, task, due_date, remind_days, priority))
-    conn.commit()
-    conn.close()
+    db.execute(
+        "INSERT INTO tasks (user_id, task, due_date, remind_days, priority, done) VALUES (?,?,?,?,?,0)",
+        (user_id, task, due_date, remind_days, priority)
+    )
+    db.commit()
+    cache.invalidate(f"tasks_{user_id}")
 
 def get_tasks(user_id):
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
-    c.execute("SELECT id, task, due_date, remind_days, priority FROM tasks WHERE user_id = ? AND done = 0 ORDER BY due_date", (user_id,))
-    rows = c.fetchall()
-    conn.close()
+    cache_key = f"tasks_{user_id}"
+    cached = cache.get(cache_key)
+    if cached:
+        return cached
+    
+    rows = db.fetchall(
+        "SELECT id, task, due_date, remind_days, priority FROM tasks WHERE user_id = ? AND done = 0 ORDER BY due_date",
+        (user_id,)
+    )
+    cache.set(cache_key, rows)
     return rows
 
 def complete_task(task_id, user_id):
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
     completed_date = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
-    c.execute("UPDATE tasks SET done = 1, completed_date = ? WHERE id = ? AND user_id = ?", 
-              (completed_date, task_id, user_id))
+    db.execute(
+        "UPDATE tasks SET done = 1, completed_date = ? WHERE id = ? AND user_id = ?",
+        (completed_date, task_id, user_id)
+    )
     
     today = datetime.now(TIMEZONE).strftime("%Y-%m-%d")
-    c.execute("SELECT id FROM daily_stats WHERE user_id = ? AND date = ?", (user_id, today))
-    daily = c.fetchone()
-    if daily:
-        c.execute("UPDATE daily_stats SET tasks_completed = tasks_completed + 1 WHERE id = ?", (daily[0],))
-    else:
-        c.execute("INSERT INTO daily_stats (user_id, date, tasks_completed) VALUES (?,?,1)", (user_id, today))
+    db.execute(
+        """INSERT INTO daily_stats (user_id, date, tasks_completed) 
+           VALUES (?, ?, 1) 
+           ON CONFLICT(user_id, date) 
+           DO UPDATE SET tasks_completed = tasks_completed + 1""",
+        (user_id, today)
+    )
     
-    conn.commit()
-    conn.close()
+    db.commit()
+    cache.invalidate(f"tasks_{user_id}")
+    cache.invalidate(f"task_stats_{user_id}")
 
 def get_task_stats(user_id):
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND done = 0", (user_id,))
-    pending = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND done = 1", (user_id,))
-    completed = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND done = 1 AND priority = 'high'", (user_id,))
-    high = c.fetchone()[0]
-    conn.close()
-    return pending, completed, high
+    cache_key = f"task_stats_{user_id}"
+    cached = cache.get(cache_key)
+    if cached:
+        return cached
+    
+    pending = db.fetchone("SELECT COUNT(*) as count FROM tasks WHERE user_id = ? AND done = 0", (user_id,))
+    completed = db.fetchone("SELECT COUNT(*) as count FROM tasks WHERE user_id = ? AND done = 1", (user_id,))
+    high = db.fetchone("SELECT COUNT(*) as count FROM tasks WHERE user_id = ? AND done = 1 AND priority = 'high'", (user_id,))
+    result = (pending['count'], completed['count'], high['count'])
+    cache.set(cache_key, result)
+    return result
 
 # ========== STUDY FUNCTIONS ==========
 def add_study_session(user_id, subject, duration):
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
     today = datetime.now(TIMEZONE).strftime("%Y-%m-%d")
-    c.execute("INSERT INTO study_sessions (user_id, subject, duration, date) VALUES (?,?,?,?)",
-              (user_id, subject, duration, today))
+    db.execute(
+        "INSERT INTO study_sessions (user_id, subject, duration, date) VALUES (?,?,?,?)",
+        (user_id, subject, duration, today)
+    )
     
-    c.execute("SELECT id FROM daily_stats WHERE user_id = ? AND date = ?", (user_id, today))
-    daily = c.fetchone()
-    if daily:
-        c.execute("UPDATE daily_stats SET study_minutes = study_minutes + ? WHERE id = ?", (duration, daily[0]))
-    else:
-        c.execute("INSERT INTO daily_stats (user_id, date, study_minutes) VALUES (?,?,?)", (user_id, today, duration))
+    db.execute(
+        """INSERT INTO daily_stats (user_id, date, study_minutes) 
+           VALUES (?, ?, ?) 
+           ON CONFLICT(user_id, date) 
+           DO UPDATE SET study_minutes = study_minutes + ?""",
+        (user_id, today, duration, duration)
+    )
     
-    conn.commit()
-    conn.close()
+    db.commit()
+    cache.invalidate(f"study_stats_{user_id}")
 
 def get_study_stats(user_id):
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
+    cache_key = f"study_stats_{user_id}"
+    cached = cache.get(cache_key)
+    if cached:
+        return cached
     
-    c.execute("SELECT SUM(duration) FROM study_sessions WHERE user_id = ?", (user_id,))
-    total = c.fetchone()[0] or 0
-    
-    c.execute("SELECT SUM(duration) FROM study_sessions WHERE user_id = ? AND date >= date('now', '-7 days')", (user_id,))
-    weekly = c.fetchone()[0] or 0
-    
-    c.execute("SELECT SUM(duration) FROM study_sessions WHERE user_id = ? AND date = date('now')", (user_id,))
-    today = c.fetchone()[0] or 0
-    
-    conn.close()
-    return total, weekly, today
-
-# ========== STATISTICS FUNCTIONS ==========
-def get_attendance_stats(user_id):
-    conn = sqlite3.connect("assistant.db")
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM class_attendance WHERE user_id = ? AND attended = 1", (user_id,))
-    attended = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM class_attendance WHERE user_id = ? AND missed = 1", (user_id,))
-    missed = c.fetchone()[0]
-    conn.close()
-    return attended, missed
+    total = db.fetchone("SELECT COALESCE(SUM(duration), 0) as total FROM study_sessions WHERE user_id = ?", (user_id,))
+    weekly = db.fetchone(
+        "SELECT COALESCE(SUM(duration), 0) as weekly FROM study_sessions WHERE user_id = ? AND date >= date('now', '-7 days')",
+        (user_id,)
+    )
+    today = db.fetchone(
+        "SELECT COALESCE(SUM(duration), 0) as today FROM study_sessions WHERE user_id = ? AND date = date('now')",
+        (user_id,)
+    )
+    result = (total['total'], weekly['weekly'], today['today'])
+    cache.set(cache_key, result)
+    return result
 
 # ========== ICS IMPORT ==========
 def import_ics_from_link(user_id, url):
@@ -8097,6 +9296,9 @@ def import_ics_from_link(user_id, url):
                     location = str(component.get('LOCATION', ''))
                     add_class(user_id, subject, start.weekday(), start.strftime("%H:%M"), end.strftime("%H:%M"), location, '')
                     count += 1
+        
+        db.commit()
+        cache.invalidate(f"schedule_{user_id}")
         return count
     except Exception as e:
         logging.error(f"ICS import error: {e}")
@@ -8105,94 +9307,228 @@ def import_ics_from_link(user_id, url):
 # ========== BOT FUNCTIONS ==========
 def send_message(vk, user_id, text, keyboard=None):
     try:
-        if not keyboard:
-            keyboard = VkKeyboard().get_empty_keyboard()
-        vk.messages.send(user_id=user_id, message=text, random_id=get_random_id(), keyboard=keyboard)
+        vk.messages.send(
+            user_id=user_id,
+            message=text[:4096],  # VK message limit
+            random_id=get_random_id(),
+            keyboard=keyboard or VkKeyboard().get_empty_keyboard()
+        )
     except Exception as e:
-        logging.error(f"Send error: {e}")
+        logging.error(f"Send error to {user_id}: {e}")
 
 def get_keyboard(lang='en'):
     keyboard = VkKeyboard(one_time=False)
+    
     if lang == 'ru':
-        keyboard.add_button("📅 Что сегодня?", color=VkKeyboardColor.PRIMARY)
-        keyboard.add_button("📅 Что завтра?", color=VkKeyboardColor.PRIMARY)
-        keyboard.add_line()
-        keyboard.add_button("⏰ Что дальше?", color=VkKeyboardColor.SECONDARY)
-        keyboard.add_button("📝 Мои задачи", color=VkKeyboardColor.SECONDARY)
-        keyboard.add_line()
-        keyboard.add_button("📊 Статистика", color=VkKeyboardColor.POSITIVE)
-        keyboard.add_button("📥 Импорт", color=VkKeyboardColor.POSITIVE)
-        keyboard.add_line()
-        keyboard.add_button("✅ Отметить", color=VkKeyboardColor.PRIMARY)
-        keyboard.add_button("❓ Помощь", color=VkKeyboardColor.PRIMARY)
+        buttons = [
+            ("📅 Что сегодня?", VkKeyboardColor.PRIMARY),
+            ("📅 Что завтра?", VkKeyboardColor.PRIMARY),
+            ("⏰ Что дальше?", VkKeyboardColor.SECONDARY),
+            ("📝 Мои задачи", VkKeyboardColor.SECONDARY),
+            ("📊 Статистика", VkKeyboardColor.POSITIVE),
+            ("📥 Импорт", VkKeyboardColor.POSITIVE),
+            ("✅ Отметить", VkKeyboardColor.PRIMARY),
+            ("❓ Помощь", VkKeyboardColor.PRIMARY)
+        ]
+    elif lang == 'zh':
+        buttons = [
+            ("📅 今天有什么课？", VkKeyboardColor.PRIMARY),
+            ("📅 明天有什么课？", VkKeyboardColor.PRIMARY),
+            ("⏰ 下节课是什么？", VkKeyboardColor.SECONDARY),
+            ("📝 我的任务", VkKeyboardColor.SECONDARY),
+            ("📊 统计", VkKeyboardColor.POSITIVE),
+            ("📥 导入", VkKeyboardColor.POSITIVE),
+            ("✅ 标记", VkKeyboardColor.PRIMARY),
+            ("❓ 帮助", VkKeyboardColor.PRIMARY)
+        ]
     else:
-        keyboard.add_button("📅 What's today?", color=VkKeyboardColor.PRIMARY)
-        keyboard.add_button("📅 What's tomorrow?", color=VkKeyboardColor.PRIMARY)
-        keyboard.add_line()
-        keyboard.add_button("⏰ What's next?", color=VkKeyboardColor.SECONDARY)
-        keyboard.add_button("📝 My tasks", color=VkKeyboardColor.SECONDARY)
-        keyboard.add_line()
-        keyboard.add_button("📊 Statistics", color=VkKeyboardColor.POSITIVE)
-        keyboard.add_button("📥 Import", color=VkKeyboardColor.POSITIVE)
-        keyboard.add_line()
-        keyboard.add_button("✅ Mark", color=VkKeyboardColor.PRIMARY)
-        keyboard.add_button("❓ Help", color=VkKeyboardColor.PRIMARY)
+        buttons = [
+            ("📅 What's today?", VkKeyboardColor.PRIMARY),
+            ("📅 What's tomorrow?", VkKeyboardColor.PRIMARY),
+            ("⏰ What's next?", VkKeyboardColor.SECONDARY),
+            ("📝 My tasks", VkKeyboardColor.SECONDARY),
+            ("📊 Statistics", VkKeyboardColor.POSITIVE),
+            ("📥 Import", VkKeyboardColor.POSITIVE),
+            ("✅ Mark", VkKeyboardColor.PRIMARY),
+            ("❓ Help", VkKeyboardColor.PRIMARY)
+        ]
+    
+    for i, (label, color) in enumerate(buttons):
+        keyboard.add_button(label, color=color)
+        if i % 2 == 1 and i < len(buttons) - 1:
+            keyboard.add_line()
+    
     return keyboard.get_keyboard()
+
+# ========== REMINDER SYSTEM ==========
+def check_reminders(vk):
+    try:
+        now = datetime.now(TIMEZONE)
+        current_day = now.weekday()
+        
+        users = db.fetchall("SELECT DISTINCT user_id FROM schedule")
+        
+        for user_row in users:
+            user_id = user_row['user_id']
+            lang = get_user_language(user_id)
+            name = get_user_name(user_id) or "friend"
+            
+            classes = db.fetchall(
+                "SELECT subject, start_time FROM schedule WHERE user_id = ? AND day = ?",
+                (user_id, current_day)
+            )
+            
+            for cls in classes:
+                hour, minute = map(int, cls['start_time'].split(':'))
+                class_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                minutes_until = (class_time - now).total_seconds() / 60
+                
+                if 60 <= minutes_until <= 90:
+                    key = f"reminder_{user_id}_{current_day}_{cls['start_time']}"
+                    existing = db.fetchone("SELECT sent FROM reminders WHERE key = ?", (key,))
+                    
+                    if not existing:
+                        msg = get_response(user_id, 'reminder', 
+                                         name=name, subject=cls['subject'], 
+                                         time=cls['start_time'], minutes=int(minutes_until))
+                        send_message(vk, user_id, msg, get_keyboard(lang))
+                        db.execute("INSERT INTO reminders (key, sent) VALUES (?, ?)", (key, 1))
+                        db.commit()
+    except Exception as e:
+        logging.error(f"Reminder error: {e}")
+
+def check_deadlines(vk):
+    try:
+        now = datetime.now(TIMEZONE)
+        today_str = now.strftime("%Y-%m-%d")
+        
+        tasks = db.fetchall(
+            "SELECT id, user_id, task, due_date, remind_days FROM tasks WHERE done = 0 AND due_date <= date(?, '+? days')",
+            (today_str, 3)
+        )
+        
+        for task in tasks:
+            due_date = datetime.strptime(task['due_date'], "%Y-%m-%d %H:%M")
+            days_left = (due_date - now).days
+            
+            if days_left <= task['remind_days'] and days_left >= 0:
+                key = f"deadline_{task['id']}_{days_left}"
+                existing = db.fetchone("SELECT sent FROM reminders WHERE key = ?", (key,))
+                
+                if not existing:
+                    lang = get_user_language(task['user_id'])
+                    name = get_user_name(task['user_id']) or "friend"
+                    msg = get_response(task['user_id'], 'deadline_reminder',
+                                     name=name, task=task['task'],
+                                     due_date=task['due_date'], days_left=days_left)
+                    send_message(vk, task['user_id'], msg, get_keyboard(lang))
+                    db.execute("INSERT INTO reminders (key, sent) VALUES (?, ?)", (key, 1))
+                    db.commit()
+    except Exception as e:
+        logging.error(f"Deadline check error: {e}")
+
+def check_first_class_alarm(vk):
+    try:
+        now = datetime.now(TIMEZONE)
+        current_day = now.weekday()
+        
+        users = db.fetchall("SELECT DISTINCT user_id FROM schedule")
+        
+        for user_row in users:
+            user_id = user_row['user_id']
+            
+            classes = db.fetchall(
+                "SELECT subject, start_time FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time",
+                (user_id, current_day)
+            )
+            
+            if classes:
+                first_class = classes[0]
+                hour, minute = map(int, first_class['start_time'].split(':'))
+                class_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                minutes_until = (class_time - now).total_seconds() / 60
+                
+                if 58 <= minutes_until <= 62:
+                    key = f"first_class_{user_id}_{now.strftime('%Y-%m-%d')}"
+                    existing = db.fetchone("SELECT sent FROM reminders WHERE key = ?", (key,))
+                    
+                    if not existing:
+                        lang = get_user_language(user_id)
+                        name = get_user_name(user_id) or "friend"
+                        msg = get_response(user_id, 'first_class_alarm',
+                                         name=name, subject=first_class['subject'],
+                                         time=first_class['start_time'], minutes=int(minutes_until))
+                        send_message(vk, user_id, msg, get_keyboard(lang))
+                        db.execute("INSERT INTO reminders (key, sent) VALUES (?, ?)", (key, 1))
+                        db.commit()
+    except Exception as e:
+        logging.error(f"First class alarm error: {e}")
 
 # ========== MAIN MESSAGE HANDLER ==========
 def handle_message(vk, user_id, text, attachments):
-    # Detect and set language
+    # Detect and set language for new users
     lang = detect_language(text)
     set_user_language(user_id, lang)
     
     name = get_user_name(user_id)
     
     # First time user - ask for name
-    if not name and not any(word in text.lower() for word in ['my name is', 'call me', 'меня зовут', 'зовут']):
+    if not name and not any(word in text.lower() for word in ['my name is', 'call me', 'меня зовут', 'зовут', '我叫']):
         send_message(vk, user_id, get_response(user_id, 'ask_name'), get_keyboard(lang))
         return
     
     # Extract name from introduction
-    name_match = re.search(r'(?:my name is|call me|меня зовут|зовут)\s+([A-Za-zА-Яа-я]+)', text, re.IGNORECASE)
+    name_match = re.search(r'(?:my name is|call me|меня зовут|зовут|我叫)\s+([A-Za-zА-Яа-я\u4e00-\u9fff]+)', text, re.IGNORECASE)
     if name_match and not name:
         name = name_match.group(1).capitalize()
         set_user_name(user_id, name)
         send_message(vk, user_id, get_response(user_id, 'got_name', name=name), get_keyboard(lang))
         return
     
+    # Language change command
+    if text.startswith('/lang'):
+        parts = text.split()
+        if len(parts) == 2 and parts[1] in ['en', 'ru', 'zh']:
+            set_user_language(user_id, parts[1])
+            send_message(vk, user_id, RESPONSES[parts[1]]['language_changed'], get_keyboard(parts[1]))
+        else:
+            send_message(vk, user_id, get_response(user_id, 'current_language'), get_keyboard(lang))
+        return
+    
     # Mark attendance button
-    if text in ["✅ Mark", "✅ Отметить"] or text in ["✅ Mark attended", "✅ Отметить пару"]:
+    if text in ["✅ Mark", "✅ Отметить", "✅ 标记", "Mark attended", "Отметить пару", "标记出勤"]:
         classes = get_today_classes(user_id)
         if classes:
-            class_list = "\n".join([f"{i+1}. {subj}" for i, (subj, _, _, _, _) in enumerate(classes)])
+            class_list = "\n".join([f"{i+1}. {cls['subject']} ({cls['start_time']}-{cls['end_time']})" 
+                                   for i, cls in enumerate(classes)])
             send_message(vk, user_id, get_response(user_id, 'attendance_prompt', name=name, classes=class_list), get_keyboard(lang))
         else:
             send_message(vk, user_id, get_response(user_id, 'no_classes_attendance', name=name), get_keyboard(lang))
         return
     
-    # Handle attendance reply (number or name)
+    # Handle attendance reply (number)
     if text.isdigit() and len(text) <= 2:
         classes = get_today_classes(user_id)
         idx = int(text) - 1
         if 0 <= idx < len(classes):
-            class_name = classes[idx][0]
+            class_name = classes[idx]['subject']
             mark_attended(user_id, class_name)
             send_message(vk, user_id, get_response(user_id, 'attendance_marked', name=name, class_name=class_name), get_keyboard(lang))
             return
     
-    # Check if text matches a class name for attendance
+    # Handle attendance by name
     classes = get_today_classes(user_id)
-    for subj, _, _, _, _ in classes:
-        if subj.lower() in text.lower() or text.lower() in subj.lower():
-            mark_attended(user_id, subj)
-            send_message(vk, user_id, get_response(user_id, 'attendance_marked', name=name, class_name=subj), get_keyboard(lang))
+    for cls in classes:
+        if cls['subject'].lower() in text.lower() or text.lower() in cls['subject'].lower():
+            mark_attended(user_id, cls['subject'])
+            send_message(vk, user_id, get_response(user_id, 'attendance_marked', name=name, class_name=cls['subject']), get_keyboard(lang))
             return
     
     # ICS link detection
     if '.ics' in text and ('http://' in text or 'https://' in text):
         url_match = re.search(r'(https?://[^\s]+\.ics)', text)
         if url_match:
-            send_message(vk, user_id, "⏳ " + ("Importing your schedule..." if lang == 'en' else "Импортирую расписание..."), get_keyboard(lang))
+            send_message(vk, user_id, "⏳ " + ("Importing your schedule..." if lang == 'en' else "Импортирую расписание..." if lang == 'ru' else "正在导入课程表..."), get_keyboard(lang))
             count = import_ics_from_link(user_id, url_match.group(1))
             if count > 0:
                 send_message(vk, user_id, get_response(user_id, 'import_success', count=count, name=name), get_keyboard(lang))
@@ -8206,82 +9542,62 @@ def handle_message(vk, user_id, text, attachments):
         if len(parts) == 2:
             ics_url = parts[1].strip()
             if ics_url.startswith(('http://', 'https://')):
-                send_message(vk, user_id, "⏳ " + ("Importing..." if lang == 'en' else "Импортирую..."), get_keyboard(lang))
+                send_message(vk, user_id, "⏳ " + ("Importing..." if lang == 'en' else "Импортирую..." if lang == 'ru' else "正在导入..."), get_keyboard(lang))
                 count = import_ics_from_link(user_id, ics_url)
                 if count > 0:
                     send_message(vk, user_id, get_response(user_id, 'import_success', count=count, name=name), get_keyboard(lang))
                 else:
                     send_message(vk, user_id, get_response(user_id, 'import_fail', name=name), get_keyboard(lang))
             else:
-                send_message(vk, user_id, "❌ " + ("Please provide a valid HTTP or HTTPS link." if lang == 'en' else "Пожалуйста, предоставьте действительную HTTP или HTTPS ссылку."), get_keyboard(lang))
+                send_message(vk, user_id, "❌ " + ("Please provide a valid HTTP or HTTPS link." if lang == 'en' else "Пожалуйста, предоставьте действительную HTTP или HTTPS ссылку." if lang == 'ru' else "请提供有效的HTTP或HTTPS链接。"), get_keyboard(lang))
         else:
             send_message(vk, user_id, get_response(user_id, 'import_instructions', name=name), get_keyboard(lang))
         return
     
     # Import button
-    if text in ["📥 Import", "📥 Импорт"] or "how to import" in text.lower() or "как импортировать" in text.lower():
+    if text in ["📥 Import", "📥 Импорт", "📥 导入"] or "how to import" in text.lower() or "как импортировать" in text.lower():
         send_message(vk, user_id, get_response(user_id, 'import_instructions', name=name), get_keyboard(lang))
         return
     
     # /task command
     if text.startswith('/task'):
-        parts = text.split(maxsplit=3)
-        if len(parts) >= 4:
-            _, task, due_date, days = parts[0], parts[1], parts[2], parts[3]
-            priority = parts[4] if len(parts) > 4 else 'normal'
-            if days.isdigit():
-                add_task(user_id, task, due_date, int(days), priority)
-                send_message(vk, user_id, get_response(user_id, 'task_added', name=name, task=task, days=days), get_keyboard(lang))
-            else:
-                send_message(vk, user_id, get_response(user_id, 'wrong_format'), get_keyboard(lang))
+        match = re.search(r'/task\s+"([^"]+)"\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\s+(\d+)\s*(high|medium|normal)?', text)
+        if match:
+            task_name = match.group(1)
+            due_date = f"{match.group(2)} {match.group(3)}"
+            days = int(match.group(4))
+            priority = match.group(5) if match.group(5) else 'normal'
+            add_task(user_id, task_name, due_date, days, priority)
+            send_message(vk, user_id, get_response(user_id, 'task_added', name=name, task=task_name, days=days), get_keyboard(lang))
         else:
             send_message(vk, user_id, get_response(user_id, 'task_format'), get_keyboard(lang))
         return
     
     # Statistics
-    if text in ["📊 Statistics", "📊 Статистика"] or "statistics" in text.lower() or "stats" in text.lower() or "статистика" in text.lower():
-        # Get all stats
+    if text in ["📊 Statistics", "📊 Статистика", "📊 统计"] or "statistics" in text.lower() or "stats" in text.lower() or "статистика" in text.lower():
         total_classes = get_class_count(user_id)
         pending, completed, high = get_task_stats(user_id)
         attended, missed = get_attendance_stats(user_id)
         total_study, weekly_study, today_study = get_study_stats(user_id)
         
-        # Calculate rates
-        attendance_rate = 0
-        if attended + missed > 0:
-            attendance_rate = round((attended / (attended + missed)) * 100, 1)
+        attendance_rate = (attended / (attended + missed) * 100) if (attended + missed) > 0 else 0
+        productivity_score = (completed / (completed + pending) * 100) if (completed + pending) > 0 else 0
         
-        productivity_score = 0
-        if completed + pending > 0:
-            productivity_score = int((completed / (completed + pending)) * 100)
-        
-        # Create progress bars
-        prod_bar = "█" * (productivity_score // 10) + "░" * (10 - (productivity_score // 10))
-        attend_bar = "█" * int(attendance_rate / 10) + "░" * (10 - int(attendance_rate / 10))
-        
+        prod_bar = create_progress_bar(productivity_score)
+        attend_bar = create_progress_bar(attendance_rate)
         avg_daily = weekly_study // 7 if weekly_study > 0 else 0
         
-        # Build message
         msg = get_response(user_id, 'stats_header', name=name) + "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        msg += get_response(user_id, 'task_mastery', completed=completed, pending=pending, high=high, score=productivity_score, bar=prod_bar) + "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        msg += get_response(user_id, 'attendance_section', total=total_classes, attended=attended, missed=missed, rate=attendance_rate, bar=attend_bar) + "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        msg += get_response(user_id, 'study_section', today=today_study, week=weekly_study, total_study=total_study, avg=avg_daily) + "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        motivations = [
-            "You're doing amazing! Keep pushing forward! 💪",
-            "Every step counts! Progress over perfection! 🌟",
-            "Your dedication is inspiring! 🎯",
-            "Small daily improvements lead to big results! 📈",
-            "You've got this! Keep up the great work! 🚀"
-        ] if lang == 'en' else [
-            "У тебя отлично получается! Продолжай в том же духе! 💪",
-            "Каждый шаг имеет значение! Прогресс важнее совершенства! 🌟",
-            "Твоя целеустремлённость вдохновляет! 🎯",
-            "Маленькие ежедневные улучшения ведут к большим результатам! 📈",
-            "У тебя всё получится! Продолжай в том же духе! 🚀"
-        ]
-        
-        msg += get_response(user_id, 'motivation', message=random.choice(motivations)) + "\n\n"
+        msg += get_response(user_id, 'task_mastery', 
+                          completed=completed, pending=pending, high=high, 
+                          score=int(productivity_score), bar=prod_bar) + "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        msg += get_response(user_id, 'attendance_section',
+                          total=total_classes, attended=attended, missed=missed,
+                          rate=round(attendance_rate, 1), bar=attend_bar) + "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        msg += get_response(user_id, 'study_section',
+                          today=today_study, week=weekly_study, total_study=total_study,
+                          avg=avg_daily) + "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        msg += get_response(user_id, 'motivation', message=random.choice(MOTIVATIONS[lang])) + "\n\n"
         msg += get_response(user_id, 'attendance_tip')
         
         send_message(vk, user_id, msg, get_keyboard(lang))
@@ -8290,17 +9606,20 @@ def handle_message(vk, user_id, text, attachments):
     text_lower = text.lower()
     
     # Today's schedule
-    if any(word in text_lower for word in ['today', 'сегодня', "what's today", 'что сегодня']):
+    if any(word in text_lower for word in ['today', 'сегодня', "what's today", 'что сегодня', '今天']):
         classes = get_today_classes(user_id)
         if classes:
             days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
             if lang == 'ru':
                 days = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+            elif lang == 'zh':
+                days = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+            
             class_list = ""
-            for subj, start, end, loc, teacher in classes:
-                class_list += f"⏰ {start}-{end} • **{subj}**\n"
-                if loc:
-                    class_list += f"   📍 {loc}\n"
+            for cls in classes:
+                class_list += f"⏰ {cls['start_time']}-{cls['end_time']} • **{cls['subject']}**\n"
+                if cls['location']:
+                    class_list += f"   📍 {cls['location']}\n"
                 class_list += "\n"
             send_message(vk, user_id, get_response(user_id, 'schedule_today', name=name, classes=class_list), get_keyboard(lang))
         else:
@@ -8308,14 +9627,14 @@ def handle_message(vk, user_id, text, attachments):
         return
     
     # Tomorrow's schedule
-    if any(word in text_lower for word in ['tomorrow', 'завтра', "what's tomorrow", 'что завтра']):
+    if any(word in text_lower for word in ['tomorrow', 'завтра', "what's tomorrow", 'что завтра', '明天']):
         classes = get_tomorrow_classes(user_id)
         if classes:
             class_list = ""
-            for subj, start, end, loc, teacher in classes:
-                class_list += f"⏰ {start}-{end} • **{subj}**\n"
-                if loc:
-                    class_list += f"   📍 {loc}\n"
+            for cls in classes:
+                class_list += f"⏰ {cls['start_time']}-{cls['end_time']} • **{cls['subject']}**\n"
+                if cls['location']:
+                    class_list += f"   📍 {cls['location']}\n"
                 class_list += "\n"
             send_message(vk, user_id, get_response(user_id, 'schedule_tomorrow', name=name, classes=class_list), get_keyboard(lang))
         else:
@@ -8323,155 +9642,118 @@ def handle_message(vk, user_id, text, attachments):
         return
     
     # Next class
-    if any(word in text_lower for word in ['next', "what's next", 'дальше', 'следующая']):
+    if any(word in text_lower for word in ['next', "what's next", 'дальше', 'следующая', '下节课']):
         subject, time = get_next_class(user_id)
         if subject:
             now = datetime.now(TIMEZONE)
             hour, minute = map(int, time.split(':'))
             class_time = now.replace(hour=hour, minute=minute, second=0)
-            minutes = int((class_time - now).total_seconds() / 60)
-            if minutes > 0:
-                send_message(vk, user_id, get_response(user_id, 'next_class', name=name, subject=subject, time=time, minutes=minutes), get_keyboard(lang))
-            else:
-                send_message(vk, user_id, get_response(user_id, 'next_class', name=name, subject=subject, time=time, minutes=0), get_keyboard(lang))
+            minutes = max(0, int((class_time - now).total_seconds() / 60))
+            send_message(vk, user_id, get_response(user_id, 'next_class', name=name, subject=subject, time=time, minutes=minutes), get_keyboard(lang))
         else:
             send_message(vk, user_id, get_response(user_id, 'no_next_class', name=name), get_keyboard(lang))
         return
     
     # My tasks
-    if any(word in text_lower for word in ['tasks', 'task', 'deadlines', 'задачи', 'дела']):
+    if any(word in text_lower for word in ['tasks', 'task', 'deadlines', 'задачи', 'дела', '任务']):
         tasks = get_tasks(user_id)
         if tasks:
             task_list = ""
-            for tid, task, due_date, days, priority in tasks:
-                dt = datetime.strptime(due_date, "%Y-%m-%d %H:%M")
-                priority_icon = "🔴" if priority == 'high' else "🟡" if priority == 'medium' else "🟢"
-                task_list += f"{priority_icon} **{task}**\n   ⏰ {dt.strftime('%d.%m.%Y %H:%M')}\n\n"
+            for task in tasks:
+                dt = datetime.strptime(task['due_date'], "%Y-%m-%d %H:%M")
+                priority_icon = "🔴" if task['priority'] == 'high' else "🟡" if task['priority'] == 'medium' else "🟢"
+                task_list += f"{priority_icon} **{task['task']}**\n   ⏰ {dt.strftime('%d.%m.%Y %H:%M')}\n\n"
             send_message(vk, user_id, get_response(user_id, 'tasks_header', name=name, tasks=task_list), get_keyboard(lang))
         else:
             send_message(vk, user_id, get_response(user_id, 'no_tasks', name=name), get_keyboard(lang))
         return
     
     # Complete task
-    done_match = re.search(r'(?:done|finished|complete|готово|сделал|выполнил)\s+(.+?)(?:\.|$)', text, re.IGNORECASE)
+    done_match = re.search(r'(?:done|finished|complete|готово|сделал|выполнил|完成)\s+(.+?)(?:\.|$)', text, re.IGNORECASE)
     if done_match:
         task_name = done_match.group(1).strip()
         tasks = get_tasks(user_id)
-        for tid, task, due_date, days, priority in tasks:
-            if task_name.lower() in task.lower() or task.lower() in task_name.lower():
-                complete_task(tid, user_id)
-                send_message(vk, user_id, get_response(user_id, 'task_completed', name=name, task=task), get_keyboard(lang))
+        for task in tasks:
+            if task_name.lower() in task['task'].lower() or task['task'].lower() in task_name.lower():
+                complete_task(task['id'], user_id)
+                send_message(vk, user_id, get_response(user_id, 'task_completed', name=name, task=task['task']), get_keyboard(lang))
                 return
         send_message(vk, user_id, get_response(user_id, 'no_task_found', name=name, task=task_name), get_keyboard(lang))
         return
     
     # Study logging
-    study_match = re.search(r'(?:study|studied|учился|занимался)\s+(\d+)\s+(?:minutes?|min|минут?)\s+(?:for\s+)?(.+?)(?:\.|$)', text, re.IGNORECASE)
+    study_match = re.search(r'(?:study|studied|учился|занимался|学习了)\s+(\d+)\s*(?:minutes?|min|минут|分钟)\s*(?:for|по|学习)?\s*(.+?)(?:\.|$)', text, re.IGNORECASE)
     if study_match:
         duration = int(study_match.group(1))
         subject = study_match.group(2).strip()
         add_study_session(user_id, subject, duration)
-        send_message(vk, user_id, f"📝 " + ("Great job! I've logged {duration} minutes for {subject}!" if lang == 'en' else f"Отлично! Записал {duration} минут учёбы по {subject}!") + " 📊 Check 'Statistics' to see your progress!", get_keyboard(lang))
+        send_message(vk, user_id, get_response(user_id, 'study_logged', name=name, minutes=duration, subject=subject), get_keyboard(lang))
         return
     
     # Help
-    if any(word in text_lower for word in ['help', 'помощь', 'what can you do']):
+    if any(word in text_lower for word in ['help', 'помощь', 'what can you do', '帮助']):
         send_message(vk, user_id, get_response(user_id, 'help_text', name=name), get_keyboard(lang))
         return
     
     # Thanks
-    if any(word in text_lower for word in ['thanks', 'thank you', 'спасибо']):
+    if any(word in text_lower for word in ['thanks', 'thank you', 'спасибо', '谢谢']):
         send_message(vk, user_id, get_response(user_id, 'thanks', name=name), get_keyboard(lang))
         return
     
     # Time
-    if any(word in text_lower for word in ['time', 'время', 'который час']):
+    if any(word in text_lower for word in ['time', 'время', 'который час', '时间']):
         now = datetime.now(TIMEZONE)
         send_message(vk, user_id, get_response(user_id, 'time', name=name, time=now.strftime('%H:%M')), get_keyboard(lang))
         return
     
     # Joke
-    if any(word in text_lower for word in ['joke', 'шутка']):
-        jokes = {
-            'en': ["Why don't scientists trust atoms? They make up everything!", "What do you call a fake noodle? An impasta!", "Why did the scarecrow win an award? He was outstanding in his field!"],
-            'ru': ["Почему программисты путают Хэллоуин с Рождеством? 31 Oct = 25 Dec!", "Как называется ложная лапша? Паста-фальшивка!", "Что говорит один ноль другому? Без тебя я просто пустое место!"]
-        }
-        send_message(vk, user_id, get_response(user_id, 'joke', name=name, joke=random.choice(jokes[lang])), get_keyboard(lang))
+    if any(word in text_lower for word in ['joke', 'шутка', '笑话']):
+        send_message(vk, user_id, get_response(user_id, 'joke', name=name, joke=random.choice(JOKES[lang])), get_keyboard(lang))
         return
     
     # Greeting
-    if any(word in text_lower for word in ['hello', 'hi', 'hey', 'привет']):
+    if any(word in text_lower for word in ['hello', 'hi', 'hey', 'привет', '你好']):
         send_message(vk, user_id, get_response(user_id, 'greeting', name=name), get_keyboard(lang))
         return
     
     # Default response
     send_message(vk, user_id, get_response(user_id, 'unknown', name=name), get_keyboard(lang))
 
-# ========== REMINDER SYSTEM ==========
-def check_reminders(vk):
-    try:
-        conn = sqlite3.connect("assistant.db")
-        c = conn.cursor()
-        now = datetime.now(TIMEZONE)
-        current_day = now.weekday()
-        
-        c.execute("SELECT DISTINCT user_id FROM schedule")
-        users = c.fetchall()
-        
-        for (user_id,) in users:
-            lang = get_user_language(user_id) or 'en'
-            name = get_user_name(user_id) or "friend"
-            
-            c.execute("SELECT subject, start_time FROM schedule WHERE user_id = ? AND day = ?", (user_id, current_day))
-            classes = c.fetchall()
-            
-            for subject, start_time in classes:
-                hour, minute = map(int, start_time.split(':'))
-                class_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-                minutes_until = (class_time - now).total_seconds() / 60
-                
-                if 60 <= minutes_until <= 90:
-                    key = f"reminder_{user_id}_{current_day}_{start_time}"
-                    c.execute("SELECT sent FROM reminders WHERE key = ?", (key,))
-                    if not c.fetchone():
-                        msg = get_response(user_id, 'reminder', name=name, subject=subject, time=start_time, minutes=int(minutes_until))
-                        send_message(vk, user_id, msg, get_keyboard(lang))
-                        c.execute("INSERT INTO reminders (key, sent) VALUES (?, ?)", (key, 1))
-                        conn.commit()
-        
-        conn.close()
-    except Exception as e:
-        logging.error(f"Reminder error: {e}")
-
 # ========== MAIN ==========
 scheduler = BackgroundScheduler()
 
 def main():
-    print("=" * 60)
-    print("🤖 Personal Assistant Bot - English & Russian Support")
-    print("=" * 60)
-    print("✅ Features:")
-    print("   • English & Russian languages (auto-detects)")
-    print("   • Schedule management")
-    print("   • Task tracking with priorities")
-    print("   • Class attendance tracking")
-    print("   • Study time logging")
-    print("   • Complete statistics")
-    print("   • 60-90 minute reminders")
-    print("   • ICS calendar import")
-    print("=" * 60)
+    print("=" * 70)
+    print("🤖 VK PERSONAL ASSISTANT BOT - ULTIMATE EDITION")
+    print("=" * 70)
+    print("✅ ENHANCED FEATURES:")
+    print("   • 🌐 Multi-language: English, Русский, 中文 (auto-detect)")
+    print("   • 📅 Complete schedule management with ICS import")
+    print("   • 📝 Task tracking with priorities and deadlines")
+    print("   • ✅ Class attendance tracking")
+    print("   • ⏱️ Study time logging")
+    print("   • 📊 Comprehensive statistics with progress bars")
+    print("   • ⏰ Smart reminders: 60-90 min before class")
+    print("   • 🔔 First class daily alarm")
+    print("   • 📧 Deadline reminders")
+    print("   • 💾 Connection pooling & caching for speed")
+    print("   • 🔄 Async message processing")
+    print("=" * 70)
     
     try:
         vk_session = vk_api.VkApi(token=VK_TOKEN)
         vk = vk_session.get_api()
         
-        scheduler.add_job(lambda: check_reminders(vk), 'interval', minutes=5)
+        # Schedule all reminder jobs
+        scheduler.add_job(lambda: check_reminders(vk), 'interval', minutes=5, id='class_reminders')
+        scheduler.add_job(lambda: check_deadlines(vk), 'interval', minutes=30, id='deadline_reminders')
+        scheduler.add_job(lambda: check_first_class_alarm(vk), 'interval', minutes=5, id='first_class_alarm')
         scheduler.start()
         
-        print("✅ Bot is running!")
-        print("💬 I speak English and Russian (auto-detects your language)")
-        print("📥 Send me an ICS link to import your schedule")
-        print("=" * 60 + "\n")
+        print("\n✅ Bot is RUNNING!")
+        print("💬 Languages: English | Русский | 中文 (auto-detects)")
+        print("📥 Send ICS link or file to import schedule")
+        print("=" * 70 + "\n")
         
         longpoll = VkBotLongPoll(vk_session, GROUP_ID)
         
@@ -8483,20 +9765,10 @@ def main():
                     text = msg.get("text", "").strip()
                     attachments = msg.get("attachments", [])
                     
-                    # Handle file uploads
+                    # Handle file uploads asynchronously
                     ics_files = [att for att in attachments if att["type"] == "doc" and att["doc"]["title"].endswith(".ics")]
                     if ics_files:
-                        url = ics_files[0]["doc"]["url"]
-                        resp = requests.get(url)
-                        if resp.status_code == 200:
-                            lang = detect_language(text)
-                            set_user_language(user_id, lang)
-                            name = get_user_name(user_id) or "friend"
-                            count = import_ics_from_link(user_id, url)
-                            if count > 0:
-                                send_message(vk, user_id, get_response(user_id, 'file_import_success', count=count, name=name), get_keyboard(lang))
-                            else:
-                                send_message(vk, user_id, get_response(user_id, 'file_import_fail', name=name), get_keyboard(lang))
+                        executor.submit(process_ics_file, vk, user_id, ics_files[0]["doc"]["url"], text)
                         continue
                     
                     # Handle button payloads
@@ -8506,7 +9778,7 @@ def main():
                             payload = json.loads(payload)
                             if payload.get("cmd") == "complete":
                                 complete_task(payload["tid"], user_id)
-                                lang = get_user_language(user_id) or 'en'
+                                lang = get_user_language(user_id)
                                 name = get_user_name(user_id) or "friend"
                                 send_message(vk, user_id, get_response(user_id, 'task_completed', name=name, task="task"), get_keyboard(lang))
                         except:
@@ -8518,13 +9790,33 @@ def main():
                         handle_message(vk, user_id, text, attachments)
                         
                 except Exception as e:
-                    logging.error(f"Error: {e}")
+                    logging.error(f"Message handling error: {e}")
                     
     except KeyboardInterrupt:
-        print("\n🛑 Bot stopped")
+        print("\n🛑 Bot stopped by user")
         scheduler.shutdown()
+        executor.shutdown(wait=False)
+        db.close()
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\n❌ Fatal error: {e}")
+        logging.error(f"Fatal error: {e}")
+
+def process_ics_file(vk, user_id, url, text):
+    try:
+        lang = detect_language(text)
+        set_user_language(user_id, lang)
+        name = get_user_name(user_id) or "friend"
+        
+        response = requests.get(url, timeout=30)
+        if response.status_code == 200:
+            count = import_ics_from_link(user_id, url)
+            if count > 0:
+                send_message(vk, user_id, get_response(user_id, 'file_import_success', count=count, name=name), get_keyboard(lang))
+            else:
+                send_message(vk, user_id, get_response(user_id, 'file_import_fail', name=name), get_keyboard(lang))
+    except Exception as e:
+        logging.error(f"ICS file processing error: {e}")
+        send_message(vk, user_id, "❌ Error processing file", get_keyboard('en'))
 
 if __name__ == "__main__":
     main()
