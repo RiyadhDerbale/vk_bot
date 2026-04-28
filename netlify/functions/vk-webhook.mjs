@@ -3134,11 +3134,6 @@ export async function checkReminders() {
 // Uses Supabase for database, optimized for VK Callback API
 // Deploy as Vercel/Cloud Function or run as standalone server
 
-import { createClient } from "@supabase/supabase-js";
-import fetch from "node-fetch";
-import ical from "ical";
-import { franc } from "franc";
-
 
 // vk-bot-working.js - Complete working bot with ICS import
 import { createClient } from "@supabase/supabase-js";
@@ -3628,40 +3623,7 @@ export async function handler(event) {
   }
 }
 
-// For local testing (not needed on Vercel)
-if (process.env.NODE_ENV === 'development') {
-  console.log("Bot running in development mode");
-}
 
-// ==================== CONFIGURATION ====================
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-const VK_TOKEN = process.env.VK_TOKEN;
-const VK_API_VERSION = "5.199";
-const TIMEZONE = process.env.TIMEZONE || "Asia/Novosibirsk";
-
-// ==================== CACHING ====================
-const cache = new Map();
-const CACHE_TTL = 300000; // 5 minutes
-
-function getCached(key) {
-  const cached = cache.get(key);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data;
-  }
-  cache.delete(key);
-  return null;
-}
-
-function setCached(key, data) {
-  cache.set(key, { data, timestamp: Date.now() });
-}
-
-function invalidateCache(userId, type) {
-  cache.delete(`${type}_${userId}`);
-}
 
 // ==================== MULTILINGUAL TRANSLATIONS ====================
 const TRANSLATIONS = {
