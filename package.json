@@ -11,10 +11,29 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.38.0",
-    "node-fetch": "^3.3.0"
+    "axios": "^1.15.2",
+    "express": "^5.2.1",
+    "franc": "^6.2.0",
+    "ical": "^0.8.0",
+    "node-cron": "^4.2.1",
+    "node-fetch": "^3.3.2",
+    "sqlite3": "^6.0.1",
+    "uuid": "^14.0.0",
+    "vk-io": "^4.10.1"
   },
   "devDependencies": {
     "@netlify/functions": "^2.4.0",
-    "netlify-cli": "^17.0.0"
-  }
+    "netlify-cli": "^25.6.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RiyadhDerbale/vk_bot.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/RiyadhDerbale/vk_bot/issues"
+  },
+  "homepage": "https://github.com/RiyadhDerbale/vk_bot#readme"
 }
