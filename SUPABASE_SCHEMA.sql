@@ -117,8 +117,8 @@ CREATE POLICY "Allow service role" ON study_logs
 
 
 
--- Create tables
-CREATE TABLE users (
+-- Create tables (run in Supabase SQL editor)
+CREATE TABLE IF NOT EXISTS users (
   vk_id BIGINT PRIMARY KEY,
   name TEXT DEFAULT '',
   language TEXT DEFAULT 'en',
@@ -126,7 +126,7 @@ CREATE TABLE users (
   join_date TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE schedule (
+CREATE TABLE IF NOT EXISTS schedule (
   id SERIAL PRIMARY KEY,
   user_id BIGINT REFERENCES users(vk_id),
   subject TEXT,
@@ -136,7 +136,7 @@ CREATE TABLE schedule (
   location TEXT
 );
 
-CREATE TABLE tasks (
+CREATE TABLE IF NOT EXISTS tasks (
   id SERIAL PRIMARY KEY,
   user_id BIGINT REFERENCES users(vk_id),
   task TEXT,
@@ -147,7 +147,7 @@ CREATE TABLE tasks (
   completed_at TIMESTAMP
 );
 
-CREATE TABLE attendance (
+CREATE TABLE IF NOT EXISTS attendance (
   id SERIAL PRIMARY KEY,
   user_id BIGINT REFERENCES users(vk_id),
   class_name TEXT,
@@ -156,7 +156,7 @@ CREATE TABLE attendance (
   UNIQUE(user_id, class_name, date)
 );
 
-CREATE TABLE study_sessions (
+CREATE TABLE IF NOT EXISTS study_sessions (
   id SERIAL PRIMARY KEY,
   user_id BIGINT REFERENCES users(vk_id),
   subject TEXT,
@@ -164,13 +164,14 @@ CREATE TABLE study_sessions (
   date DATE
 );
 
-CREATE TABLE reminders (
+CREATE TABLE IF NOT EXISTS reminders (
   key TEXT PRIMARY KEY,
   sent INTEGER DEFAULT 1,
   reminder_time TIMESTAMP DEFAULT NOW()
 );
 
--- Create indexes
+-- Create indexes for performance
 CREATE INDEX idx_schedule_user_day ON schedule(user_id, day);
 CREATE INDEX idx_tasks_user_done ON tasks(user_id, done);
 CREATE INDEX idx_attendance_user_date ON attendance(user_id, date);
+CREATE INDEX idx_study_user_date ON study_sessions(user_id, date);
