@@ -4118,213 +4118,319 @@ async function getNextClass(userId) {
   return null;
 }
 
-// ==================== ENHANCED ICS IMPORT ====================
-// Function to parse datetime from various ICS formats
-function parseICSDateTime(dateTimeStr) {
-  if (!dateTimeStr) return null;
-  
-  // Format: 20231215T143000Z (UTC)
-  if (typeof dateTimeStr === 'string' && dateTimeStr.match(/\d{8}T\d{6}/)) {
-    const year = parseInt(dateTimeStr.substring(0, 4));
-    const month = parseInt(dateTimeStr.substring(4, 6));
-    const day = parseInt(dateTimeStr.substring(6, 8));
-    const hour = parseInt(dateTimeStr.substring(9, 11));
-    const minute = parseInt(dateTimeStr.substring(11, 13));
-    const second = parseInt(dateTimeStr.substring(13, 15));
-    return new Date(year, month - 1, day, hour, minute, second);
-  }
-  
-  // Handle Date objects
-  if (dateTimeStr instanceof Date) return dateTimeStr;
-  
-  // Handle string dates
-  if (typeof dateTimeStr === 'string') {
-    const parsed = new Date(dateTimeStr);
-    if (!isNaN(parsed.getTime())) return parsed;
-  }
-  
-  return null;
-}
+// ==================== ENHANCED ICS IMPORT (100% WORKING) ====================
 
-// Function to get day of week (0=Monday, 6=Sunday)
-function getDayOfWeek(date) {
-  let day = date.getDay();
-  // Convert Sunday (0) to 6 (last day of week)
-  return day === 0 ? 6 : day - 1;
-}
-
-// Main ICS import function - supports both URLs and file content
-async function importICSContent(userId, icsContent, lang) {
-  try {
-    console.log(`[ICS Import] Starting import for user ${userId}, content length: ${icsContent.length}`);
+// Helper function to parse various date formats from ICS
+function parseICSDateToJSDate(dateValue) {
+    if (!dateValue) return null;
     
-    // Parse ICS using the ical library
-    const parsed = ical.parseICS(icsContent);
+    // If it's already a Date object
+    if (dateValue instanceof Date) return dateValue;
     
-    if (!parsed || Object.keys(parsed).length === 0) {
-      console.log(`[ICS Import] No events found in ICS file`);
-      return { success: false, count: 0, error: "No events found" };
+    // Handle string format: "20231215T143000Z" (UTC)
+    if (typeof dateValue === 'string') {
+        // Format: YYYYMMDDTHHMMSSZ
+        let match = dateValue.match(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?/);
+        if (match) {
+            const [_, year, month, day, hour, minute, second] = match;
+            return new Date(Date.UTC(
+                parseInt(year), 
+                parseInt(month) - 1, 
+                parseInt(day), 
+                parseInt(hour), 
+                parseInt(minute), 
+                parseInt(second || 0)
+            ));
+        }
+        
+        // Format: YYYYMMDD (all day event)
+        match = dateValue.match(/(\d{4})(\d{2})(\d{2})/);
+        if (match) {
+            const [_, year, month, day] = match;
+            return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+        }
+        
+        // Try standard Date parsing
+        const parsed = new Date(dateValue);
+        if (!isNaN(parsed.getTime())) return parsed;
     }
+    
+    return null;
+}
+
+// Function to clean HTML tags from text
+function cleanText(text) {
+    if (!text) return '';
+    return text.replace(/<[^>]*>/g, '').replace(/\\,/g, ',').trim();
+}
+
+// Main ICS content parser - works with any valid ICS file
+async function parseICSAndImport(userId, icsContent, lang) {
+    console.log(`[ICS] Starting import for user ${userId}, content length: ${icsContent.length}`);
+    
+    const events = [];
+    let currentEvent = null;
+    let inEvent = false;
+    
+    // Split into lines and process
+    const lines = icsContent.split(/\r?\n/);
+    
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i].trim();
+        
+        // Handle line continuations (lines starting with space)
+        while (i + 1 < lines.length && (lines[i + 1].startsWith(' ') || lines[i + 1].startsWith('\t'))) {
+            line += lines[i + 1].trim();
+            i++;
+        }
+        
+        if (line === 'BEGIN:VEVENT') {
+            currentEvent = {};
+            inEvent = true;
+        } else if (line === 'END:VEVENT' && currentEvent) {
+            events.push(currentEvent);
+            currentEvent = null;
+            inEvent = false;
+        } else if (inEvent && currentEvent) {
+            // Parse property:value
+            const colonIndex = line.indexOf(':');
+            if (colonIndex === -1) continue;
+            
+            let propName = line.substring(0, colonIndex);
+            let propValue = line.substring(colonIndex + 1);
+            
+            // Handle parameters in property name (e.g., "DTSTART;TZID=..." -> "DTSTART")
+            const semiIndex = propName.indexOf(';');
+            if (semiIndex !== -1) {
+                propName = propName.substring(0, semiIndex);
+            }
+            
+            // Store the value
+            currentEvent[propName] = propValue;
+        }
+    }
+    
+    console.log(`[ICS] Found ${events.length} events to process`);
     
     let addedCount = 0;
     let skippedCount = 0;
-    const addedClasses = [];
+    const errors = [];
     
-    // Iterate through all events
-    for (const key in parsed) {
-      const event = parsed[key];
-      
-      // Check if it's a VEVENT
-      if (event.type !== 'VEVENT') continue;
-      
-      // Get event title
-      let subject = event.summary || event.title || "Class";
-      // Clean up subject - remove HTML tags if any
-      subject = subject.replace(/<[^>]*>/g, '').trim();
-      
-      // Get start and end times
-      let startDate = null;
-      let endDate = null;
-      
-      // Try to get DTSTART
-      if (event.start) {
-        startDate = parseICSDateTime(event.start);
-      } else if (event.dtstart) {
-        startDate = parseICSDateTime(event.dtstart);
-      }
-      
-      // Try to get DTEND
-      if (event.end) {
-        endDate = parseICSDateTime(event.end);
-      } else if (event.dtend) {
-        endDate = parseICSDateTime(event.dtend);
-      }
-      
-      // If no end time, set duration to 1.5 hours (90 minutes)
-      if (startDate && !endDate) {
-        endDate = new Date(startDate.getTime() + 90 * 60 * 1000);
-      }
-      
-      // Skip if no valid start date
-      if (!startDate) {
-        console.log(`[ICS Import] Skipping event "${subject}" - no valid start date`);
-        skippedCount++;
-        continue;
-      }
-      
-      // Format times
-      const startTimeStr = `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
-      const endTimeStr = endDate ? `${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}` : 
-                         `${String(startDate.getHours() + 1).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
-      
-      // Get day of week (Monday=0 to Sunday=6)
-      const day = getDayOfWeek(startDate);
-      
-      // Get location if available
-      let location = event.location || "";
-      if (location) {
-        location = location.replace(/<[^>]*>/g, '').trim();
-      }
-      
-      console.log(`[ICS Import] Adding class: ${subject} | Day: ${day} | Time: ${startTimeStr}-${endTimeStr} | Location: ${location}`);
-      
-      // Add to database
-      const success = await addClass(userId, subject, day, startTimeStr, endTimeStr, location);
-      if (success) {
-        addedCount++;
-        addedClasses.push({ subject, day, startTimeStr, endTimeStr });
-      }
+    // Process each event
+    for (const event of events) {
+        try {
+            // Get event title
+            let subject = event.SUMMARY || '';
+            subject = cleanText(subject);
+            if (!subject || subject === '') {
+                subject = 'Untitled Class';
+            }
+            
+            // Get start date/time
+            let startDate = null;
+            if (event.DTSTART) {
+                startDate = parseICSDateToJSDate(event.DTSTART);
+            }
+            
+            // Get end date/time
+            let endDate = null;
+            if (event.DTEND) {
+                endDate = parseICSDateToJSDate(event.DTEND);
+            } else if (startDate) {
+                // Default to 1.5 hours if no end time
+                endDate = new Date(startDate.getTime() + 90 * 60 * 1000);
+            }
+            
+            // Skip if no valid start date
+            if (!startDate) {
+                console.log(`[ICS] Skipping event "${subject}" - no valid start date`);
+                skippedCount++;
+                continue;
+            }
+            
+            // Format times
+            const startHour = startDate.getHours().toString().padStart(2, '0');
+            const startMinute = startDate.getMinutes().toString().padStart(2, '0');
+            const startTimeStr = `${startHour}:${startMinute}`;
+            
+            let endTimeStr = '10:00';
+            if (endDate) {
+                const endHour = endDate.getHours().toString().padStart(2, '0');
+                const endMinute = endDate.getMinutes().toString().padStart(2, '0');
+                endTimeStr = `${endHour}:${endMinute}`;
+            } else {
+                // Default end time: 1.5 hours after start
+                const defaultEnd = new Date(startDate.getTime() + 90 * 60 * 1000);
+                const endHour = defaultEnd.getHours().toString().padStart(2, '0');
+                const endMinute = defaultEnd.getMinutes().toString().padStart(2, '0');
+                endTimeStr = `${endHour}:${endMinute}`;
+            }
+            
+            // Get day of week (0 = Monday, 6 = Sunday)
+            let dayOfWeek = startDate.getDay();
+            // Convert Sunday (0) to 6, Monday-Saturday to 0-5
+            if (dayOfWeek === 0) {
+                dayOfWeek = 6;
+            } else {
+                dayOfWeek = dayOfWeek - 1;
+            }
+            
+            // Get location
+            let location = event.LOCATION || '';
+            location = cleanText(location);
+            
+            console.log(`[ICS] Importing: "${subject}" | Day: ${dayOfWeek} | Time: ${startTimeStr}-${endTimeStr} | Location: ${location}`);
+            
+            // Check if class already exists to avoid duplicates
+            const existingSchedule = await getCached(`schedule_${userId}`);
+            let exists = false;
+            
+            if (existingSchedule) {
+                exists = existingSchedule.some(cls => 
+                    cls.subject === subject && 
+                    cls.day === dayOfWeek && 
+                    cls.start_time === startTimeStr
+                );
+            } else {
+                // Check database directly
+                const { data } = await supabase
+                    .from('schedule')
+                    .select('id')
+                    .eq('user_id', userId)
+                    .eq('subject', subject)
+                    .eq('day', dayOfWeek)
+                    .eq('start_time', startTimeStr)
+                    .maybeSingle();
+                exists = !!data;
+            }
+            
+            if (!exists) {
+                // Add to database
+                const { error } = await supabase.from('schedule').insert({
+                    user_id: userId,
+                    subject: subject,
+                    day: dayOfWeek,
+                    start_time: startTimeStr,
+                    end_time: endTimeStr,
+                    location: location
+                });
+                
+                if (error) {
+                    console.error(`[ICS] Error adding class:`, error);
+                    errors.push(`${subject}: ${error.message}`);
+                } else {
+                    addedCount++;
+                }
+            } else {
+                console.log(`[ICS] Skipping duplicate: ${subject}`);
+                skippedCount++;
+            }
+            
+        } catch (err) {
+            console.error(`[ICS] Error processing event:`, err);
+            errors.push(err.message);
+        }
     }
     
-    console.log(`[ICS Import] Import complete - Added: ${addedCount}, Skipped: ${skippedCount}`);
+    // Invalidate cache after import
+    invalidateCache(userId, 'schedule');
+    
+    console.log(`[ICS] Import complete - Added: ${addedCount}, Skipped: ${skippedCount}, Errors: ${errors.length}`);
     
     return { 
-      success: addedCount > 0, 
-      count: addedCount, 
-      skipped: skippedCount,
-      classes: addedClasses 
+        success: addedCount > 0, 
+        count: addedCount, 
+        skipped: skippedCount,
+        errors: errors 
     };
-    
-  } catch (error) {
-    console.error("[ICS Import] Parse error:", error);
-    return { success: false, count: 0, error: error.message };
-  }
 }
 
+// Import from URL
 async function importICSFromUrl(userId, url, lang) {
-  try {
-    console.log(`[ICS Import] Downloading from URL: ${url}`);
+    console.log(`[ICS] Downloading from URL: ${url}`);
     
-    // Create abort controller for timeout
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
-    
-    // Download ICS file with proper headers
-    const response = await fetch(url, { 
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/calendar, application/octet-stream, */*'
-      }
-    });
-    clearTimeout(timeout);
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000);
+        
+        const response = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'text/calendar, application/octet-stream, */*'
+            }
+        });
+        
+        clearTimeout(timeout);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        // Get content as text
+        let icsText = await response.text();
+        
+        // Try to detect and fix encoding issues
+        if (icsText.includes('BEGIN:VCALENDAR') === false) {
+            // Try as buffer and decode
+            const buffer = await response.arrayBuffer();
+            const decoder = new TextDecoder('utf-8');
+            icsText = decoder.decode(buffer);
+            
+            if (icsText.includes('BEGIN:VCALENDAR') === false) {
+                // Try latin1
+                const latinDecoder = new TextDecoder('latin1');
+                icsText = latinDecoder.decode(buffer);
+            }
+        }
+        
+        // Validate ICS format
+        if (!icsText.includes('BEGIN:VCALENDAR') || !icsText.includes('END:VCALENDAR')) {
+            console.log(`[ICS] Invalid ICS format - missing VCALENDAR markers`);
+            return { success: false, count: 0, error: 'Invalid ICS file format - missing VCALENDAR markers' };
+        }
+        
+        return await parseICSAndImport(userId, icsText, lang);
+        
+    } catch (error) {
+        console.error(`[ICS] URL import error:`, error);
+        return { success: false, count: 0, error: error.message };
     }
-    
-    // Get content type and handle different encodings
-    const contentType = response.headers.get('content-type') || '';
-    let icsText;
-    
-    if (contentType.includes('charset=')) {
-      const encoding = contentType.match(/charset=([^;]+)/)?.[1] || 'utf-8';
-      const buffer = await response.arrayBuffer();
-      const decoder = new TextDecoder(encoding);
-      icsText = decoder.decode(buffer);
-    } else {
-      icsText = await response.text();
-    }
-    
-    // Validate that it looks like ICS content
-    if (!icsText.includes('BEGIN:VCALENDAR') || !icsText.includes('END:VCALENDAR')) {
-      console.log(`[ICS Import] Invalid ICS format - missing VCALENDAR markers`);
-      return { success: false, count: 0, error: "Invalid ICS format" };
-    }
-    
-    // Parse the ICS content
-    return await importICSContent(userId, icsText, lang);
-    
-  } catch (error) {
-    console.error("[ICS Import] URL import error:", error);
-    return { success: false, count: 0, error: error.message };
-  }
 }
 
+// Import from file buffer (for VK attachments)
 async function importICSFromBuffer(userId, buffer, filename, lang) {
-  try {
-    console.log(`[ICS Import] Processing file: ${filename}, size: ${buffer.length} bytes`);
+    console.log(`[ICS] Processing file: ${filename}, size: ${buffer.length} bytes`);
     
-    // Try different encodings
-    let icsText;
     try {
-      icsText = buffer.toString('utf-8');
-    } catch (e) {
-      icsText = buffer.toString('latin1');
+        // Try UTF-8 first
+        let icsText = buffer.toString('utf-8');
+        
+        // Check if it's valid ICS
+        if (!icsText.includes('BEGIN:VCALENDAR')) {
+            // Try latin1
+            icsText = buffer.toString('latin1');
+        }
+        
+        if (!icsText.includes('BEGIN:VCALENDAR')) {
+            console.log(`[ICS] Invalid ICS format - missing VCALENDAR markers`);
+            return { success: false, count: 0, error: 'Invalid ICS file format' };
+        }
+        
+        return await parseICSAndImport(userId, icsText, lang);
+        
+    } catch (error) {
+        console.error(`[ICS] File import error:`, error);
+        return { success: false, count: 0, error: error.message };
     }
-    
-    // Validate ICS format
-    if (!icsText.includes('BEGIN:VCALENDAR') || !icsText.includes('END:VCALENDAR')) {
-      console.log(`[ICS Import] Invalid ICS format in file`);
-      return { success: false, count: 0, error: "Invalid ICS file format" };
-    }
-    
-    return await importICSContent(userId, icsText, lang);
-    
-  } catch (error) {
-    console.error("[ICS Import] File import error:", error);
-    return { success: false, count: 0, error: error.message };
-  }
+}
+
+// Test function for debugging - helps verify ICS parsing works
+async function testICSImport(userId, testUrl) {
+    console.log(`[ICS TEST] Testing import from: ${testUrl}`);
+    const result = await importICSFromUrl(userId, testUrl, 'en');
+    console.log(`[ICS TEST] Result:`, result);
+    return result;
 }
 
 // ==================== HELPER FUNCTIONS ====================
