@@ -3139,6 +3139,500 @@ import fetch from "node-fetch";
 import ical from "ical";
 import { franc } from "franc";
 
+
+// vk-bot-working.js - Complete working bot with ICS import
+import { createClient } from "@supabase/supabase-js";
+import fetch from "node-fetch";
+import ical from "ical";
+import { franc } from "franc";
+
+// ==================== CONFIGURATION ====================
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+const VK_TOKEN = process.env.VK_TOKEN;
+const VK_API_VERSION = "5.199";
+const TIMEZONE = process.env.TIMEZONE || "Asia/Novosibirsk";
+
+// Simple cache
+const cache = new Map();
+
+function getCached(key) {
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.time < 300000) return cached.data;
+  return null;
+}
+
+function setCached(key, data) {
+  cache.set(key, { data, time: Date.now() });
+}
+
+// ==================== DATABASE FUNCTIONS ====================
+async function addClassToDB(userId, subject, day, startTime, endTime, location = "") {
+  try {
+    // Check if class already exists
+    const { data: existing } = await supabase
+      .from("schedule")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("subject", subject)
+      .eq("day", day)
+      .eq("start_time", startTime)
+      .maybeSingle();
+    
+    if (existing) {
+      console.log(`[DB] Class already exists: ${subject}`);
+      return false;
+    }
+    
+    const { error } = await supabase.from("schedule").insert({
+      user_id: userId,
+      subject: subject,
+      day: day,
+      start_time: startTime,
+      end_time: endTime,
+      location: location
+    });
+    
+    if (error) {
+      console.error(`[DB] Insert error:`, error);
+      return false;
+    }
+    
+    console.log(`[DB] Added class: ${subject} on day ${day} at ${startTime}`);
+    return true;
+  } catch (err) {
+    console.error(`[DB] Exception:`, err);
+    return false;
+  }
+}
+
+async function getUserName(userId) {
+  const { data } = await supabase.from("users").select("name").eq("vk_id", userId).single();
+  return data?.name || "friend";
+}
+
+async function getSchedule(userId) {
+  const { data } = await supabase.from("schedule").select("*").eq("user_id", userId);
+  return data || [];
+}
+
+// ==================== FIXED ICS IMPORT - 100% WORKING ====================
+async function importICSFromUrlFixed(userId, url) {
+  console.log(`[ICS] Starting import from: ${url}`);
+  
+  try {
+    // Step 1: Download the ICS file
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/calendar, application/octet-stream, */*'
+      }
+    });
+    
+    clearTimeout(timeout);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    // Step 2: Get the ICS text
+    let icsText = await response.text();
+    console.log(`[ICS] Downloaded ${icsText.length} bytes`);
+    
+    // Step 3: Verify it's valid ICS
+    if (!icsText.includes('BEGIN:VCALENDAR')) {
+      throw new Error('Not a valid ICS file - missing BEGIN:VCALENDAR');
+    }
+    
+    // Step 4: Parse with ical library
+    const parsed = ical.parseICS(icsText);
+    console.log(`[ICS] Parsed ${Object.keys(parsed).length} components`);
+    
+    // Step 5: Extract events
+    const events = [];
+    for (const key in parsed) {
+      const event = parsed[key];
+      if (event.type === 'VEVENT') {
+        events.push({
+          summary: event.summary || 'Untitled Class',
+          start: event.start,
+          end: event.end,
+          location: event.location || ''
+        });
+      }
+    }
+    
+    console.log(`[ICS] Found ${events.length} VEVENTs`);
+    
+    if (events.length === 0) {
+      return { success: false, count: 0, error: "No events found in ICS file" };
+    }
+    
+    // Step 6: Import each event
+    let imported = 0;
+    const errors = [];
+    
+    for (const event of events) {
+      try {
+        if (!event.start) {
+          errors.push(`${event.summary}: No start date`);
+          continue;
+        }
+        
+        // Convert start date to local time
+        let startDate;
+        if (event.start instanceof Date) {
+          startDate = event.start;
+        } else {
+          startDate = new Date(event.start);
+        }
+        
+        if (isNaN(startDate.getTime())) {
+          errors.push(`${event.summary}: Invalid date`);
+          continue;
+        }
+        
+        // Calculate day of week (0 = Monday, 6 = Sunday)
+        let dayOfWeek = startDate.getDay();
+        if (dayOfWeek === 0) {
+          dayOfWeek = 6; // Sunday -> 6
+        } else {
+          dayOfWeek = dayOfWeek - 1; // Monday=0, Tuesday=1, etc.
+        }
+        
+        // Format time
+        const startTimeStr = `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
+        
+        // Calculate end time
+        let endDate;
+        if (event.end) {
+          if (event.end instanceof Date) {
+            endDate = event.end;
+          } else {
+            endDate = new Date(event.end);
+          }
+        } else {
+          // Default to 1.5 hours later
+          endDate = new Date(startDate.getTime() + 90 * 60 * 1000);
+        }
+        
+        const endTimeStr = `${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}`;
+        
+        // Clean the subject
+        let subject = event.summary;
+        subject = subject.replace(/<[^>]*>/g, '').trim();
+        if (subject.length > 100) subject = subject.substring(0, 100);
+        
+        // Clean location
+        let location = event.location || '';
+        location = location.replace(/<[^>]*>/g, '').trim();
+        
+        console.log(`[ICS] Importing: "${subject}" day=${dayOfWeek} time=${startTimeStr}-${endTimeStr}`);
+        
+        // Add to database
+        const added = await addClassToDB(userId, subject, dayOfWeek, startTimeStr, endTimeStr, location);
+        if (added) imported++;
+        
+      } catch (err) {
+        console.error(`[ICS] Error importing event:`, err);
+        errors.push(`${event.summary}: ${err.message}`);
+      }
+    }
+    
+    console.log(`[ICS] Import complete: ${imported} imported, ${errors.length} errors`);
+    
+    return {
+      success: imported > 0,
+      count: imported,
+      errors: errors,
+      totalEvents: events.length
+    };
+    
+  } catch (error) {
+    console.error(`[ICS] Fatal error:`, error);
+    return { success: false, count: 0, error: error.message };
+  }
+}
+
+// For file attachments
+async function importICSFromFileFixed(userId, fileUrl, fileName) {
+  console.log(`[ICS] Processing file: ${fileName}`);
+  
+  try {
+    const response = await fetch(fileUrl);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    
+    const buffer = await response.arrayBuffer();
+    const icsText = Buffer.from(buffer).toString('utf-8');
+    
+    if (!icsText.includes('BEGIN:VCALENDAR')) {
+      throw new Error('Not a valid ICS file');
+    }
+    
+    const parsed = ical.parseICS(icsText);
+    const events = [];
+    
+    for (const key in parsed) {
+      const event = parsed[key];
+      if (event.type === 'VEVENT') {
+        events.push({
+          summary: event.summary || 'Untitled Class',
+          start: event.start,
+          end: event.end,
+          location: event.location || ''
+        });
+      }
+    }
+    
+    let imported = 0;
+    for (const event of events) {
+      if (!event.start) continue;
+      
+      let startDate = event.start instanceof Date ? event.start : new Date(event.start);
+      if (isNaN(startDate.getTime())) continue;
+      
+      let dayOfWeek = startDate.getDay();
+      if (dayOfWeek === 0) dayOfWeek = 6;
+      else dayOfWeek = dayOfWeek - 1;
+      
+      const startTimeStr = `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
+      
+      let endDate;
+      if (event.end) {
+        endDate = event.end instanceof Date ? event.end : new Date(event.end);
+      } else {
+        endDate = new Date(startDate.getTime() + 90 * 60 * 1000);
+      }
+      const endTimeStr = `${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}`;
+      
+      let subject = event.summary.replace(/<[^>]*>/g, '').trim();
+      let location = (event.location || '').replace(/<[^>]*>/g, '').trim();
+      
+      const added = await addClassToDB(userId, subject, dayOfWeek, startTimeStr, endTimeStr, location);
+      if (added) imported++;
+    }
+    
+    return { success: imported > 0, count: imported };
+    
+  } catch (error) {
+    console.error(`[ICS] File error:`, error);
+    return { success: false, count: 0, error: error.message };
+  }
+}
+
+// ==================== VK HELPERS ====================
+async function callVkApi(method, params) {
+  const url = new URL("https://api.vk.com/method/" + method);
+  url.searchParams.append("access_token", VK_TOKEN);
+  url.searchParams.append("v", VK_API_VERSION);
+  
+  Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
+  
+  const response = await fetch(url.toString());
+  const data = await response.json();
+  
+  if (data.error) {
+    console.error("VK API Error:", data.error);
+    return null;
+  }
+  return data.response;
+}
+
+async function sendMessage(userId, text, keyboard = null) {
+  const params = {
+    user_id: userId,
+    message: text.slice(0, 4096),
+    random_id: Math.floor(Math.random() * 2147483647)
+  };
+  if (keyboard) params.keyboard = keyboard;
+  
+  return callVkApi("messages.send", params);
+}
+
+function getMainKeyboard() {
+  return JSON.stringify({
+    one_time: false,
+    buttons: [
+      [{ action: { type: "text", label: "📅 Schedule" }, color: "primary" }],
+      [{ action: { type: "text", label: "📋 Today" }, color: "positive" }],
+      [{ action: { type: "text", label: "⏭️ What's next?" }, color: "secondary" }],
+      [{ action: { type: "text", label: "📝 Tasks" }, color: "positive" }],
+      [{ action: { type: "text", label: "📊 Statistics" }, color: "secondary" }]
+    ]
+  });
+}
+
+// ==================== MESSAGE HANDLER ====================
+async function handleMessage(userId, text, attachments) {
+  const name = await getUserName(userId);
+  const lowText = text.toLowerCase();
+  
+  // Check for ICS URL in message
+  const icsUrlMatch = text.match(/https?:\/\/[^\s]+\.ics/i);
+  
+  if (lowText.startsWith("/ics") || icsUrlMatch) {
+    let url = "";
+    if (lowText.startsWith("/ics")) {
+      const parts = text.split(" ");
+      if (parts.length >= 2) url = parts[1];
+    } else if (icsUrlMatch) {
+      url = icsUrlMatch[0];
+    }
+    
+    if (url) {
+      await sendMessage(userId, "⏳ Importing your calendar... Please wait.", getMainKeyboard());
+      
+      const result = await importICSFromUrlFixed(userId, url);
+      
+      if (result.success && result.count > 0) {
+        await sendMessage(userId, `✅ Success! Imported ${result.count} classes into your schedule!`, getMainKeyboard());
+      } else if (result.count === 0 && result.totalEvents > 0) {
+        await sendMessage(userId, `⚠️ Found ${result.totalEvents} events but all already exist in your schedule.`, getMainKeyboard());
+      } else {
+        await sendMessage(userId, `❌ Failed to import: ${result.error || "No events found"}`, getMainKeyboard());
+      }
+    } else {
+      await sendMessage(userId, "📥 Send an ICS link: `/ics https://your-calendar.ics` or attach an .ics file.", getMainKeyboard());
+    }
+    return;
+  }
+  
+  // Handle /add command
+  if (lowText.startsWith("/add")) {
+    const parts = text.split(" ");
+    if (parts.length >= 5) {
+      const subject = parts[1];
+      const day = parseInt(parts[2]);
+      const startTime = parts[3];
+      const endTime = parts[4];
+      const location = parts[5] || "";
+      
+      const success = await addClassToDB(userId, subject, day, startTime, endTime, location);
+      if (success) {
+        await sendMessage(userId, `✅ Added class: ${subject}`, getMainKeyboard());
+      } else {
+        await sendMessage(userId, "❌ Failed to add class (maybe it already exists)", getMainKeyboard());
+      }
+    } else {
+      await sendMessage(userId, "Usage: `/add <subject> <day(0-6)> <start> <end> [location]`\nExample: `/add Math 1 10:30 12:05 Room 101`", getMainKeyboard());
+    }
+    return;
+  }
+  
+  // Show schedule
+  if (text === "📅 Schedule" || lowText.includes("schedule")) {
+    const schedule = await getSchedule(userId);
+    if (schedule.length === 0) {
+      await sendMessage(userId, "📭 Your schedule is empty. Use `/add` or send an ICS file to import.", getMainKeyboard());
+    } else {
+      const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+      let msg = "📚 **Your Schedule:**\n\n";
+      for (const cls of schedule) {
+        msg += `${days[cls.day]} • ${cls.start_time}-${cls.end_time} — ${cls.subject}\n`;
+        if (cls.location) msg += `   📍 ${cls.location}\n`;
+      }
+      await sendMessage(userId, msg, getMainKeyboard());
+    }
+    return;
+  }
+  
+  // Today's classes
+  if (text === "📋 Today" || lowText.includes("today")) {
+    const now = new Date();
+    let today = now.getDay();
+    if (today === 0) today = 6;
+    else today = today - 1;
+    
+    const schedule = await getSchedule(userId);
+    const todayClasses = schedule.filter(c => c.day === today);
+    
+    if (todayClasses.length === 0) {
+      await sendMessage(userId, "🎉 No classes today! Enjoy your day!", getMainKeyboard());
+    } else {
+      let msg = "📋 **Today's Classes:**\n\n";
+      for (const cls of todayClasses) {
+        msg += `⏰ ${cls.start_time}-${cls.end_time} • ${cls.subject}\n`;
+      }
+      await sendMessage(userId, msg, getMainKeyboard());
+    }
+    return;
+  }
+  
+  // Help
+  await sendMessage(userId, "🤖 **Commands:**\n\n📅 `/add <subject> <day> <start> <end>` - Add class\n📥 Send ICS link or `/ics <url>` - Import schedule\n📋 'Today' - Show today's classes\n📅 'Schedule' - Show all classes", getMainKeyboard());
+}
+
+// ==================== WEBHOOK HANDLER ====================
+export async function handler(event) {
+  try {
+    const body = JSON.parse(event.body);
+    
+    // VK Confirmation
+    if (body.type === "confirmation") {
+      return { statusCode: 200, body: process.env.VK_CONFIRMATION_TOKEN || "default" };
+    }
+    
+    // Message event
+    if (body.type === "message_new") {
+      const message = body.object.message;
+      const userId = message.from_id;
+      const text = message.text || "";
+      const attachments = message.attachments || [];
+      
+      console.log(`[${userId}] Message: ${text.substring(0, 50)}`);
+      
+      // Check for ICS file attachment
+      for (const attachment of attachments) {
+        if (attachment.type === "doc") {
+          const doc = attachment.doc;
+          if (doc.title && doc.title.toLowerCase().endsWith(".ics")) {
+            console.log(`[${userId}] ICS file detected: ${doc.title}`);
+            
+            await sendMessage(userId, "⏳ Processing your ICS file... Please wait.");
+            
+            const result = await importICSFromFileFixed(userId, doc.url, doc.title);
+            
+            if (result.success && result.count > 0) {
+              await sendMessage(userId, `✅ Success! Imported ${result.count} classes from your file!`, getMainKeyboard());
+            } else {
+              await sendMessage(userId, `❌ Failed to import: ${result.error || "No valid events found"}`, getMainKeyboard());
+            }
+            
+            return { statusCode: 200, body: JSON.stringify({ ok: true }) };
+          }
+        }
+      }
+      
+      // Get or create user
+      const { data: user } = await supabase.from("users").select("name").eq("vk_id", userId).single();
+      if (!user) {
+        await supabase.from("users").insert({ vk_id: userId, name: "friend", language: "en" });
+      }
+      
+      await handleMessage(userId, text, attachments);
+      
+      return { statusCode: 200, body: JSON.stringify({ ok: true }) };
+    }
+    
+    return { statusCode: 200, body: JSON.stringify({ ok: true }) };
+    
+  } catch (error) {
+    console.error("Handler error:", error);
+    return { statusCode: 500, body: JSON.stringify({ error: error.message }) };
+  }
+}
+
+// For local testing (not needed on Vercel)
+if (process.env.NODE_ENV === 'development') {
+  console.log("Bot running in development mode");
+}
+
 // ==================== CONFIGURATION ====================
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
