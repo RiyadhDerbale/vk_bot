@@ -1,4 +1,4 @@
-/*import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 import fetch from "node-fetch";
 
 // Initialize Supabase
@@ -1494,7 +1494,10 @@ export async function handler(event) {
       body: JSON.stringify({ error: error.message }),
     };
   }
-}*/
+}
+
+
+
 
 
 // VK Smart Hour Bot - Multilingual Edition (English, Русский, 中文)
