@@ -1501,6 +1501,10 @@ export async function handler(event) {
 // Supports automatic language detection and user language preferences
 // Install: npm install node-fetch node-cron ical uuid express franc
 
+// VK Smart Hour Bot - Multilingual Edition (English, Русский, 中文)
+// Supports automatic language detection and user language preferences
+// Install: npm install node-fetch node-cron ical uuid express franc
+
 import fetch from 'node-fetch';
 import cron from 'node-cron';
 import ical from 'ical';
