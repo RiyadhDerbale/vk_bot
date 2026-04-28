@@ -1511,6 +1511,12 @@ export async function handler(event) {
 // Full-featured bot with multilingual support, schedule management, task tracking, attendance, study logging, and ICS import
 // Requires: npm install vk-io node-cron ical uuid sqlite3 axios franc
 
+
+
+// VK Smart Assistant Bot - Ultimate Node.js Edition
+// Full-featured bot with multilingual support (EN/RU/ZH), schedule management, tasks, attendance, study logging, ICS import
+// Install: npm install vk-io node-cron ical uuid sqlite3 axios franc node-cache
+
 import { VK, Keyboard, KeyboardBuilder } from 'vk-io';
 import cron from 'node-cron';
 import ical from 'ical';
@@ -1519,6 +1525,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import axios from 'axios';
 import franc from 'franc';
+import NodeCache from 'node-cache';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
@@ -1531,10 +1538,14 @@ const VK_TOKEN = "vk1.a.eZvEbyVQo2aLD4K-r_7DxudJLQ4iNke42CLOnxo-ewzkJhDCjgY-FFIm
 const GROUP_ID = 237363984;
 const TIMEZONE = "Asia/Novosibirsk";
 
+// Performance settings
+const CACHE_TTL = 300; // 5 minutes
+const MAX_WORKERS = 10;
+
 // ==================== MULTILINGUAL TRANSLATIONS ====================
 const TRANSLATIONS = {
     en: {
-        // Greetings & Setup
+        // Setup & Greetings
         ask_name: "👋 Hey there! I'm your personal academic assistant. What's your name?",
         got_name: "🎉 Nice to meet you, {name}! I'll help you manage your schedule, tasks, and track your progress!",
         greeting: "👋 Hey {name}! Ready to stay organized today? Check your schedule or tasks!",
@@ -1567,7 +1578,7 @@ const TRANSLATIONS = {
         
         // ICS Import
         import_success: "🎉 Success! Imported {count} classes into your schedule, {name}!\n\n✅ I'll remind you before each class.\n📅 Ask 'What's today?' to see your schedule!",
-        import_fail: "❌ Couldn't import from that link. Make sure it's a valid ICS file from your university portal.",
+        import_fail: "❌ Couldn't import from that link. Make sure it's a valid ICS file.",
         import_instructions: "📥 **Import Your Schedule**\n\n1️⃣ Send me an ICS link (from your university portal)\n2️⃣ Use: `/ics https://your-calendar.ics`\n3️⃣ Attach an .ics file directly\n\nI'll auto-add all your classes with reminders! ⏰",
         
         // Statistics
@@ -1578,11 +1589,51 @@ const TRANSLATIONS = {
         motivation: "💡 **MOTIVATION**\n{message}",
         attendance_tip: "📌 *Tip: Mark attendance after each class to boost your stats!*",
         
-        // Help & Commands
-        help_text: "🤖 **What I Can Do For You, {name}**\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📅 **SCHEDULE**\n• \"What's today?\" - Today's classes\n• \"What's tomorrow?\" - Tomorrow's classes\n• \"What's next?\" - Next class\n• Send ICS link - Import timetable\n\n✅ **ATTENDANCE**\n• \"Mark\" or \"✅ Mark\" - Track attended classes\n\n📝 **TASKS**\n• \"My tasks\" - See all tasks\n• `/task \"Task\" 2025-12-20 23:59 7 high`\n• \"Done [task]\" - Mark complete\n\n📊 **STATISTICS**\n• \"Statistics\" - Complete progress report\n\n⏱️ **STUDY TIME**\n• \"Studied 30 minutes for Math\" - Log study time\n\n📥 **IMPORT**\n• Send ICS link or /ics [url]\n\n⏰ **REMINDERS**\n• Automatic 60-90 min before class\n\n🌐 **LANGUAGE**\n• /lang ru - Русский\n• /lang en - English\n• /lang zh - 中文\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nWhat would you like help with? 😊",
+        // Help
+        help_text: `🤖 **What I Can Do For You, {name}**
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📅 **SCHEDULE**
+• "What's today?" - Today's classes
+• "What's tomorrow?" - Tomorrow's classes  
+• "What's next?" - Next class
+• Send ICS link - Import timetable
+
+✅ **ATTENDANCE**
+• "Mark" or "✅ Mark" - Track attended classes
+
+📝 **TASKS**
+• "My tasks" - See all tasks
+• /task "Task" 2025-12-20 23:59 7 high
+• "Done [task]" - Mark complete
+
+📊 **STATISTICS**
+• "Statistics" - Complete progress report
+
+⏱️ **STUDY TIME**
+• "Studied 30 minutes for Math" - Log study time
+
+📥 **IMPORT**
+• Send ICS link or /ics [url]
+
+⏰ **REMINDERS**
+• Automatic 60-90 min before class
+• First class daily alarm
+• Deadline reminders
+
+🌐 **LANGUAGE**
+• /lang ru - Русский
+• /lang en - English  
+• /lang zh - 中文
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+What would you like help with? 😊`,
         
         // Reminders
         reminder: "⏰ **CLASS REMINDER, {name}!**\n\n📚 {subject}\n🕐 at {time}\n⏱️ Starts in {minutes} minutes!\n\n✅ Don't forget to mark attendance after class!",
+        first_class_alarm: "⏰ **FIRST CLASS SOON, {name}!**\n\n📚 {subject}\n🕐 at {time}\n⏱️ Starts in {minutes} minutes!\n\nGet ready and don't be late! 📖",
+        deadline_reminder: "📝 **DEADLINE REMINDER, {name}!**\n\nTask: {task}\n⏰ Due: {due_date}\n{days_left} day(s) remaining!\n\nDon't forget to complete it! 🎯",
         
         // Responses
         thanks: "You're welcome, {name}! 😊 Anything else? Check 'Statistics' to see your progress!",
@@ -1634,9 +1685,49 @@ const TRANSLATIONS = {
         motivation: "💡 **МОТИВАЦИЯ**\n{message}",
         attendance_tip: "📌 *Совет: Отмечай посещаемость после каждой пары для повышения статистики!*",
         
-        help_text: "🤖 **Что я умею, {name}**\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📅 **РАСПИСАНИЕ**\n• \"Что сегодня?\" - пары на сегодня\n• \"Что завтра?\" - пары на завтра\n• \"Что дальше?\" - следующую пару\n• Отправь ICS ссылку - импорт расписания\n\n✅ **ПОСЕЩАЕМОСТЬ**\n• \"Отметить\" или \"✅ Отметить\" - учёт посещений\n\n📝 **ЗАДАЧИ**\n• \"Мои задачи\" - список дел\n• `/task \"Задача\" 2025-12-20 23:59 7 high`\n• \"Готово [задача]\" - отметить выполненное\n\n📊 **СТАТИСТИКА**\n• \"Статистика\" - полный отчёт\n\n⏱️ **ВРЕМЯ УЧЁБЫ**\n• \"Учился 30 минут по Математике\" - логирование\n\n📥 **ИМПОРТ**\n• Отправь ICS ссылку или /ics [url]\n\n⏰ **НАПОМИНАНИЯ**\n• Автоматически за 60-90 минут до пары\n\n🌐 **ЯЗЫК**\n• /lang ru - Русский\n• /lang en - English\n• /lang zh - 中文\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nЧем могу помочь? 😊",
+        help_text: `🤖 **Что я умею, {name}**
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📅 **РАСПИСАНИЕ**
+• "Что сегодня?" - пары на сегодня
+• "Что завтра?" - пары на завтра
+• "Что дальше?" - следующую пару
+• Отправь ICS ссылку - импорт расписания
+
+✅ **ПОСЕЩАЕМОСТЬ**
+• "Отметить" или "✅ Отметить" - учёт посещений
+
+📝 **ЗАДАЧИ**
+• "Мои задачи" - список дел
+• /task "Задача" 2025-12-20 23:59 7 high
+• "Готово [задача]" - отметить выполненное
+
+📊 **СТАТИСТИКА**
+• "Статистика" - полный отчёт
+
+⏱️ **ВРЕМЯ УЧЁБЫ**
+• "Учился 30 минут по Математике" - логирование
+
+📥 **ИМПОРТ**
+• Отправь ICS ссылку или /ics [url]
+
+⏰ **НАПОМИНАНИЯ**
+• Автоматически за 60-90 минут до пары
+• Ежедневная тревога за 60 мин до первой пары
+• Напоминания о дедлайнах
+
+🌐 **ЯЗЫК**
+• /lang ru - Русский
+• /lang en - English
+• /lang zh - 中文
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Чем могу помочь? 😊`,
         
         reminder: "⏰ **НАПОМИНАНИЕ, {name}!**\n\n📚 {subject}\n🕐 в {time}\n⏱️ Через {minutes} минут!\n\n✅ Не забудь отметить посещаемость!",
+        first_class_alarm: "⏰ **СКОРО ПЕРВАЯ ПАРА, {name}!**\n\n📚 {subject}\n🕐 в {time}\n⏱️ Через {minutes} минут!\n\nГотовься и не опаздывай! 📖",
+        deadline_reminder: "📝 **НАПОМИНАНИЕ О ДЕДЛАЙНЕ, {name}!**\n\nЗадача: {task}\n⏰ Срок: {due_date}\nОсталось {days_left} дн.\n\nНе забудь выполнить! 🎯",
         
         thanks: "Пожалуйста, {name}! 😊 Ещё что-то? Проверь 'Статистику' чтобы увидеть прогресс!",
         time: "🕐 Сейчас {time}, {name}. Что в планах?",
@@ -1677,7 +1768,7 @@ const TRANSLATIONS = {
         
         import_success: "🎉 成功！已导入{count}节课到你的课程表，{name}！\n\n✅ 我会在每节课前提醒你。\n📅 问'今天有什么课？'查看课程表！",
         import_fail: "❌ 无法从该链接导入。请确保是有效的ICS文件。",
-        import_instructions: "📥 **导入课程表**\n\n1️⃣ 发送ICS链接（来自学校门户）\n2️⃣ 使用：`/ics https://your-calendar.ics`\n3️⃣ 直接附加.ics文件\n\n我会自动添加所有课程并设置提醒！⏰",
+        import_instructions: "📥 **导入课程表**\n\n1️⃣ 发送ICS链接（来自学校网站）\n2️⃣ 使用：`/ics https://your-calendar.ics`\n3️⃣ 直接附加.ics文件\n\n我会自动添加所有课程并设置提醒！⏰",
         
         stats_header: "📊 **你的学习统计，{name}！** 📊\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
         task_stats: "📝 **任务完成情况**\n• ✅ 已完成：{completed}\n• ⏳ 待完成：{pending}\n• 🔴 高优先级完成：{high}\n• 🎯 生产力：{score}%\n   [{bar}]",
@@ -1686,84 +1777,128 @@ const TRANSLATIONS = {
         motivation: "💡 **激励语**\n{message}",
         attendance_tip: "📌 *提示：课后标记出勤可以提高你的统计数据！*",
         
-        help_text: "🤖 **我能为你做什么，{name}**\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📅 **课程表**\n• \"今天有什么课？\" - 今日课程\n• \"明天有什么课？\" - 明日课程\n• \"下节课是什么？\" - 下节课\n• 发送ICS链接 - 导入课程表\n\n✅ **出勤**\n• \"标记\"或\"✅ 标记\" - 记录出勤\n\n📝 **任务**\n• \"我的任务\" - 查看任务\n• `/task \"任务名\" 2025-12-20 23:59 7 high`\n• \"完成 [任务名]\" - 标记完成\n\n📊 **统计**\n• \"统计\" - 完整进度报告\n\n⏱️ **学习时间**\n• \"学习了30分钟数学\" - 记录学习\n\n📥 **导入**\n• 发送ICS链接或 /ics [网址]\n\n⏰ **提醒**\n• 课前60-90分钟自动提醒\n\n🌐 **语言**\n• /lang ru - Русский\n• /lang en - English\n• /lang zh - 中文\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n需要什么帮助？😊",
+        help_text: `🤖 **我能为你做什么，{name}**
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📅 **课程表**
+• "今天有什么课？" - 今日课程
+• "明天有什么课？" - 明日课程
+• "下节课是什么？" - 下节课
+• 发送ICS链接 - 导入课程表
+
+✅ **出勤**
+• "标记"或"✅ 标记" - 记录出勤
+
+📝 **任务**
+• "我的任务" - 查看任务
+• /task "任务名" 2025-12-20 23:59 7 high
+• "完成 [任务名]" - 标记完成
+
+📊 **统计**
+• "统计" - 完整进度报告
+
+⏱️ **学习时间**
+• "学习了30分钟数学" - 记录学习
+
+📥 **导入**
+• 发送ICS链接或 /ics [网址]
+
+⏰ **提醒**
+• 课前60-90分钟自动提醒
+• 第一节课前60分钟闹钟
+• 截止日期提醒
+
+🌐 **语言**
+• /lang ru - Русский
+• /lang en - English
+• /lang zh - 中文
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+需要什么帮助？😊`,
         
         reminder: "⏰ **课程提醒，{name}！**\n\n📚 {subject}\n🕐 在 {time}\n⏱️ {minutes}分钟后开始！\n\n✅ 课后记得标记出勤！",
+        first_class_alarm: "⏰ **第一节课即将开始，{name}！**\n\n📚 {subject}\n🕐 在 {time}\n⏱️ {minutes}分钟后开始！\n\n准备好，不要迟到！📖",
+        deadline_reminder: "📝 **截止日期提醒，{name}！**\n\n任务：{task}\n⏰ 截止：{due_date}\n还剩 {days_left} 天！\n\n不要忘记完成！🎯",
         
         thanks: "不客气，{name}！😊 还有什么需要？查看'统计'了解你的进度！",
         time: "🕐 当前时间：{time}，{name}。今天有什么安排？",
         joke: "😂 给你讲个笑话，{name}：\n\n{joke}",
         unknown: "🤔 有意思，{name}！我能帮你什么？试试'帮助'看看我能做什么！",
         language_changed: "🌐 语言已切换为中文！所有消息将使用中文。",
-        current_language: "🌐 当前语言：中文\n\n可用：/lang ru, /lang en, /lang zh",
+        current_language: "🌐 当前语言：中文\n\n可用：/lang en, /lang ru, /lang zh",
         
         days: ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
     }
 };
 
-// Motivational messages
-const MOTIVATION_EN = [
-    "You're doing amazing! Keep pushing forward! 💪",
-    "Every step counts! Progress over perfection! 🌟",
-    "Your dedication is inspiring! 🎯",
-    "Small daily improvements lead to big results! 📈",
-    "You've got this! Keep up the great work! 🚀",
-    "Consistency is key, and you're crushing it! 🔑",
-    "Today's efforts are tomorrow's success! ⭐"
-];
+// Jokes and motivations
+const JOKES = {
+    en: [
+        "Why don't scientists trust atoms? Because they make up everything!",
+        "What do you call a fake noodle? An impasta!",
+        "Why did the scarecrow win an award? He was outstanding in his field!",
+        "What do you call a bear with no teeth? A gummy bear!",
+        "Why don't eggs tell jokes? They'd crack each other up!"
+    ],
+    ru: [
+        "Почему программисты путают Хэллоуин с Рождеством? 31 Oct = 25 Dec!",
+        "Как называется ложная лапша? Паста-фальшивка!",
+        "Что говорит один ноль другому? Без тебя я просто пустое место!",
+        "Почему студенты любят овощи? Потому что они всегда есть!",
+        "Как называется медведь без зубов? Жевательный мишка!"
+    ],
+    zh: [
+        "为什么科学家不相信原子？因为它们构成了一切！",
+        "什么叫假面条？假面食！",
+        "稻草人为什么得奖？因为他在田里表现出色！",
+        "没有牙齿的熊叫什么？软糖熊！",
+        "鸡蛋为什么不讲笑话？因为它们会笑裂！"
+    ]
+};
 
-const MOTIVATION_RU = [
-    "У тебя отлично получается! Продолжай в том же духе! 💪",
-    "Каждый шаг имеет значение! Прогресс важнее совершенства! 🌟",
-    "Твоя целеустремлённость вдохновляет! 🎯",
-    "Маленькие ежедневные улучшения ведут к большим результатам! 📈",
-    "У тебя всё получится! Продолжай в том же духе! 🚀",
-    "Постоянство - ключ к успеху, и у тебя отлично получается! 🔑",
-    "Сегодняшние усилия - завтрашний успех! ⭐"
-];
-
-const MOTIVATION_ZH = [
-    "你做得太棒了！继续加油！💪",
-    "每一步都很重要！进步胜于完美！🌟",
-    "你的努力很鼓舞人心！🎯",
-    "小小的日常改进会带来巨大的成果！📈",
-    "你能行的！继续保持！🚀",
-    "坚持是关键，而你做得很好！🔑",
-    "今天的努力是明天的成功！⭐"
-];
-
-const JOKES_EN = [
-    "Why don't scientists trust atoms? Because they make up everything!",
-    "What do you call a fake noodle? An impasta!",
-    "Why did the scarecrow win an award? He was outstanding in his field!",
-    "What do you call a bear with no teeth? A gummy bear!",
-    "Why don't eggs tell jokes? They'd crack each other up!"
-];
-
-const JOKES_RU = [
-    "Почему программисты путают Хэллоуин с Рождеством? 31 Oct = 25 Dec!",
-    "Как называется ложная лапша? Паста-фальшивка!",
-    "Что говорит один ноль другому? Без тебя я просто пустое место!",
-    "Почему студенты любят овощи? Потому что они всегда есть!",
-    "Как называется медведь без зубов? Жевательный мишка!"
-];
-
-const JOKES_ZH = [
-    "为什么科学家不相信原子？因为它们构成了一切！",
-    "什么叫假面条？假面食！",
-    "稻草人为什么得奖？因为他在田里表现出色！",
-    "没有牙齿的熊叫什么？软糖熊！",
-    "鸡蛋为什么不讲笑话？因为它们会笑裂！"
-];
+const MOTIVATIONS = {
+    en: [
+        "You're doing amazing! Keep pushing forward! 💪",
+        "Every step counts! Progress over perfection! 🌟",
+        "Your dedication is inspiring! 🎯",
+        "Small daily improvements lead to big results! 📈",
+        "You've got this! Keep up the great work! 🚀",
+        "Consistency is key, and you're crushing it! 🔑",
+        "Today's efforts are tomorrow's success! ⭐"
+    ],
+    ru: [
+        "У тебя отлично получается! Продолжай в том же духе! 💪",
+        "Каждый шаг имеет значение! Прогресс важнее совершенства! 🌟",
+        "Твоя целеустремлённость вдохновляет! 🎯",
+        "Маленькие ежедневные улучшения ведут к большим результатам! 📈",
+        "У тебя всё получится! Продолжай в том же духе! 🚀",
+        "Постоянство - ключ к успеху, и у тебя отлично получается! 🔑",
+        "Сегодняшние усилия - завтрашний успех! ⭐"
+    ],
+    zh: [
+        "你做得太棒了！继续加油！💪",
+        "每一步都很重要！进步胜于完美！🌟",
+        "你的努力很鼓舞人心！🎯",
+        "小小的日常改进会带来巨大的成果！📈",
+        "你能行的！继续保持！🚀",
+        "坚持是关键，而你做得很好！🔑",
+        "今天的努力是明天的成功！⭐"
+    ]
+};
 
 // ==================== DATABASE SETUP ====================
 let db;
+const cache = new NodeCache({ stdTTL: CACHE_TTL });
 
 async function initDatabase() {
     db = await open({
         filename: join(__dirname, 'assistant.db'),
         driver: sqlite3.Database
     });
+    
+    await db.exec(`PRAGMA journal_mode=WAL`);
+    await db.exec(`PRAGMA cache_size=-20000`);
     
     // Users table
     await db.exec(`CREATE TABLE IF NOT EXISTS users (
@@ -1785,6 +1920,7 @@ async function initDatabase() {
         location TEXT,
         teacher TEXT
     )`);
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_schedule_user_day ON schedule(user_id, day)`);
     
     // Class attendance
     await db.exec(`CREATE TABLE IF NOT EXISTS class_attendance (
@@ -1793,8 +1929,10 @@ async function initDatabase() {
         class_name TEXT,
         date TEXT,
         attended INTEGER DEFAULT 0,
-        missed INTEGER DEFAULT 0
+        missed INTEGER DEFAULT 0,
+        UNIQUE(user_id, class_name, date)
     )`);
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_attendance_user_date ON class_attendance(user_id, date)`);
     
     // Tasks table
     await db.exec(`CREATE TABLE IF NOT EXISTS tasks (
@@ -1808,6 +1946,7 @@ async function initDatabase() {
         done INTEGER DEFAULT 0,
         completed_date DATETIME
     )`);
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_user_done ON tasks(user_id, done)`);
     
     // Study sessions
     await db.exec(`CREATE TABLE IF NOT EXISTS study_sessions (
@@ -1817,6 +1956,7 @@ async function initDatabase() {
         duration INTEGER,
         date TEXT
     )`);
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_study_user_date ON study_sessions(user_id, date)`);
     
     // Daily statistics
     await db.exec(`CREATE TABLE IF NOT EXISTS daily_stats (
@@ -1825,7 +1965,8 @@ async function initDatabase() {
         date TEXT,
         tasks_completed INTEGER DEFAULT 0,
         classes_attended INTEGER DEFAULT 0,
-        study_minutes INTEGER DEFAULT 0
+        study_minutes INTEGER DEFAULT 0,
+        UNIQUE(user_id, date)
     )`);
     
     // Reminders tracking
@@ -1835,30 +1976,28 @@ async function initDatabase() {
         reminder_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     
-    // Conversations log
-    await db.exec(`CREATE TABLE IF NOT EXISTS conversations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        message TEXT,
-        response TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
-    
-    console.log('✅ Database initialized');
+    console.log('✅ Database initialized with WAL mode and indexes');
 }
 
 // ==================== DATABASE HELPERS ====================
 async function getUser(userId) {
+    const cacheKey = `user_${userId}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+    
     const user = await db.get('SELECT * FROM users WHERE vk_id = ?', userId);
+    if (user) cache.set(cacheKey, user);
     return user;
 }
 
 async function createUser(userId, name = null, language = 'en') {
     await db.run('INSERT OR REPLACE INTO users (vk_id, name, language) VALUES (?, ?, ?)', userId, name || '', language);
+    cache.del(`user_${userId}`);
 }
 
 async function updateUserName(userId, name) {
     await db.run('UPDATE users SET name = ? WHERE vk_id = ?', name, userId);
+    cache.del(`user_${userId}`);
 }
 
 async function getUserLanguage(userId) {
@@ -1868,46 +2007,68 @@ async function getUserLanguage(userId) {
 
 async function setUserLanguage(userId, language) {
     await db.run('UPDATE users SET language = ? WHERE vk_id = ?', language, userId);
+    cache.del(`user_${userId}`);
 }
 
-async function getReminderOffset(userId) {
-    const user = await getUser(userId);
-    return user ? user.reminder_offset : 75;
+function getTranslation(userId, key, params = {}) {
+    const lang = getUserLanguage(userId) || 'en';
+    let text = TRANSLATIONS[lang]?.[key] || TRANSLATIONS.en[key] || key;
+    
+    for (const [k, v] of Object.entries(params)) {
+        text = text.replace(new RegExp(`{${k}}`, 'g'), v);
+    }
+    return text;
 }
 
-// Schedule functions
+// ==================== SCHEDULE FUNCTIONS ====================
 async function addClass(userId, subject, day, startTime, endTime, location = '', teacher = '') {
     await db.run(
-        'INSERT INTO schedule (user_id, subject, day, start_time, end_time, location, teacher) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        `INSERT INTO schedule (user_id, subject, day, start_time, end_time, location, teacher) 
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         userId, subject, day, startTime, endTime, location, teacher
     );
+    cache.del(`schedule_${userId}`);
+    cache.del(`schedule_today_${userId}`);
 }
 
 async function getTodayClasses(userId, timezone) {
-    const today = new Date().toLocaleString('en-US', { timeZone: timezone });
-    const day = new Date(today).getDay();
-    const weekday = day === 0 ? 7 : day;
+    const cacheKey = `schedule_today_${userId}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
     
-    return await db.all(
-        'SELECT subject, start_time, end_time, location, teacher FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time',
-        userId, weekday - 1
+    const now = new Date().toLocaleString('en-US', { timeZone: timezone });
+    const today = new Date(now).getDay();
+    const weekday = today === 0 ? 6 : today - 1;
+    
+    const rows = await db.all(
+        `SELECT subject, start_time, end_time, location, teacher 
+         FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time`,
+        userId, weekday
     );
+    cache.set(cacheKey, rows);
+    return rows;
 }
 
 async function getTomorrowClasses(userId, timezone) {
-    const tomorrow = new Date(new Date().toLocaleString('en-US', { timeZone: timezone }));
+    const now = new Date().toLocaleString('en-US', { timeZone: timezone });
+    const tomorrow = new Date(now);
     tomorrow.setDate(tomorrow.getDate() + 1);
     const day = tomorrow.getDay();
-    const weekday = day === 0 ? 7 : day;
+    const weekday = day === 0 ? 6 : day - 1;
     
     return await db.all(
-        'SELECT subject, start_time, end_time, location, teacher FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time',
-        userId, weekday - 1
+        `SELECT subject, start_time, end_time, location, teacher 
+         FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time`,
+        userId, weekday
     );
 }
 
 async function getAllClasses(userId) {
-    return await db.all('SELECT subject, day, start_time, end_time, location FROM schedule WHERE user_id = ? ORDER BY day, start_time', userId);
+    return await db.all(
+        `SELECT subject, day, start_time, end_time, location 
+         FROM schedule WHERE user_id = ? ORDER BY day, start_time`,
+        userId
+    );
 }
 
 async function getClassCount(userId) {
@@ -1916,94 +2077,119 @@ async function getClassCount(userId) {
 }
 
 async function getNextClass(userId, timezone) {
-    const now = new Date(new Date().toLocaleString('en-US', { timeZone: timezone }));
-    const currentDay = now.getDay();
-    const weekday = currentDay === 0 ? 7 : currentDay;
-    const currentTime = now.toTimeString().slice(0, 5);
+    const now = new Date().toLocaleString('en-US', { timeZone: timezone });
+    const currentDate = new Date(now);
+    const currentDay = currentDate.getDay();
+    const weekday = currentDay === 0 ? 6 : currentDay - 1;
+    const currentTime = currentDate.toTimeString().slice(0, 5);
     
     const classes = await db.all(
-        'SELECT subject, day, start_time FROM schedule WHERE user_id = ? ORDER BY day, start_time',
+        `SELECT subject, day, start_time FROM schedule WHERE user_id = ? ORDER BY day, start_time`,
         userId
     );
     
     for (const cls of classes) {
-        const classDay = cls.day + 1;
-        if (classDay > weekday || (classDay === weekday && cls.start_time > currentTime)) {
+        if (cls.day > weekday || (cls.day === weekday && cls.start_time > currentTime)) {
             return cls;
         }
     }
     return classes[0] || null;
 }
 
-// Attendance functions
+// ==================== ATTENDANCE FUNCTIONS ====================
 async function markAttendance(userId, className, timezone) {
     const date = new Date().toLocaleString('en-US', { timeZone: timezone }).split(',')[0];
     
-    const existing = await db.get(
-        'SELECT id FROM class_attendance WHERE user_id = ? AND class_name = ? AND date = ?',
+    await db.run(
+        `INSERT INTO class_attendance (user_id, class_name, date, attended, missed) 
+         VALUES (?, ?, ?, 1, 0) 
+         ON CONFLICT(user_id, class_name, date) 
+         DO UPDATE SET attended = 1, missed = 0`,
         userId, className, date
     );
     
-    if (existing) {
-        await db.run('UPDATE class_attendance SET attended = 1, missed = 0 WHERE id = ?', existing.id);
-    } else {
-        await db.run(
-            'INSERT INTO class_attendance (user_id, class_name, date, attended, missed) VALUES (?, ?, ?, 1, 0)',
-            userId, className, date
-        );
-    }
+    await db.run(
+        `INSERT INTO daily_stats (user_id, date, classes_attended) 
+         VALUES (?, ?, 1) 
+         ON CONFLICT(user_id, date) 
+         DO UPDATE SET classes_attended = classes_attended + 1`,
+        userId, date
+    );
     
-    // Update daily stats
-    const daily = await db.get('SELECT id FROM daily_stats WHERE user_id = ? AND date = ?', userId, date);
-    if (daily) {
-        await db.run('UPDATE daily_stats SET classes_attended = classes_attended + 1 WHERE id = ?', daily.id);
-    } else {
-        await db.run('INSERT INTO daily_stats (user_id, date, classes_attended) VALUES (?, ?, 1)', userId, date);
-    }
+    cache.del(`attendance_stats_${userId}`);
 }
 
 async function getAttendanceStats(userId) {
+    const cacheKey = `attendance_stats_${userId}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+    
     const attended = await db.get('SELECT COUNT(*) as count FROM class_attendance WHERE user_id = ? AND attended = 1', userId);
     const missed = await db.get('SELECT COUNT(*) as count FROM class_attendance WHERE user_id = ? AND missed = 1', userId);
-    return { attended: attended.count, missed: missed.count };
+    const result = { attended: attended.count, missed: missed.count };
+    cache.set(cacheKey, result);
+    return result;
 }
 
-// Task functions
+// ==================== TASK FUNCTIONS ====================
 async function addTask(userId, task, dueDate, remindDays, priority = 'normal') {
     await db.run(
-        'INSERT INTO tasks (user_id, task, due_date, remind_days, priority, done) VALUES (?, ?, ?, ?, ?, 0)',
+        `INSERT INTO tasks (user_id, task, due_date, remind_days, priority, done) 
+         VALUES (?, ?, ?, ?, ?, 0)`,
         userId, task, dueDate, remindDays, priority
     );
+    cache.del(`tasks_${userId}`);
+    cache.del(`task_stats_${userId}`);
 }
 
 async function getActiveTasks(userId) {
-    return await db.all(
-        'SELECT id, task, due_date, remind_days, priority FROM tasks WHERE user_id = ? AND done = 0 ORDER BY due_date',
+    const cacheKey = `tasks_${userId}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+    
+    const tasks = await db.all(
+        `SELECT id, task, due_date, remind_days, priority 
+         FROM tasks WHERE user_id = ? AND done = 0 ORDER BY due_date`,
         userId
     );
+    cache.set(cacheKey, tasks);
+    return tasks;
 }
 
 async function completeTask(taskId, userId, timezone) {
     const completedDate = new Date().toLocaleString('en-US', { timeZone: timezone });
-    await db.run('UPDATE tasks SET done = 1, completed_date = ? WHERE id = ? AND user_id = ?', completedDate, taskId, userId);
+    await db.run(
+        'UPDATE tasks SET done = 1, completed_date = ? WHERE id = ? AND user_id = ?',
+        completedDate, taskId, userId
+    );
     
     const date = new Date().toLocaleString('en-US', { timeZone: timezone }).split(',')[0];
-    const daily = await db.get('SELECT id FROM daily_stats WHERE user_id = ? AND date = ?', userId, date);
-    if (daily) {
-        await db.run('UPDATE daily_stats SET tasks_completed = tasks_completed + 1 WHERE id = ?', daily.id);
-    } else {
-        await db.run('INSERT INTO daily_stats (user_id, date, tasks_completed) VALUES (?, ?, 1)', userId, date);
-    }
+    await db.run(
+        `INSERT INTO daily_stats (user_id, date, tasks_completed) 
+         VALUES (?, ?, 1) 
+         ON CONFLICT(user_id, date) 
+         DO UPDATE SET tasks_completed = tasks_completed + 1`,
+        userId, date
+    );
+    
+    cache.del(`tasks_${userId}`);
+    cache.del(`task_stats_${userId}`);
 }
 
 async function getTaskStats(userId) {
+    const cacheKey = `task_stats_${userId}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+    
     const pending = await db.get('SELECT COUNT(*) as count FROM tasks WHERE user_id = ? AND done = 0', userId);
     const completed = await db.get('SELECT COUNT(*) as count FROM tasks WHERE user_id = ? AND done = 1', userId);
     const highPriority = await db.get('SELECT COUNT(*) as count FROM tasks WHERE user_id = ? AND done = 1 AND priority = "high"', userId);
-    return { pending: pending.count, completed: completed.count, high: highPriority.count };
+    const result = { pending: pending.count, completed: completed.count, high: highPriority.count };
+    cache.set(cacheKey, result);
+    return result;
 }
 
-// Study session functions
+// ==================== STUDY FUNCTIONS ====================
 async function addStudySession(userId, subject, duration, timezone) {
     const date = new Date().toLocaleString('en-US', { timeZone: timezone }).split(',')[0];
     await db.run(
@@ -2011,31 +2197,45 @@ async function addStudySession(userId, subject, duration, timezone) {
         userId, subject, duration, date
     );
     
-    const daily = await db.get('SELECT id FROM daily_stats WHERE user_id = ? AND date = ?', userId, date);
-    if (daily) {
-        await db.run('UPDATE daily_stats SET study_minutes = study_minutes + ? WHERE id = ?', duration, daily.id);
-    } else {
-        await db.run('INSERT INTO daily_stats (user_id, date, study_minutes) VALUES (?, ?, ?)', userId, date, duration);
-    }
+    await db.run(
+        `INSERT INTO daily_stats (user_id, date, study_minutes) 
+         VALUES (?, ?, ?) 
+         ON CONFLICT(user_id, date) 
+         DO UPDATE SET study_minutes = study_minutes + ?`,
+        userId, date, duration, duration
+    );
+    
+    cache.del(`study_stats_${userId}`);
 }
 
 async function getStudyStats(userId) {
+    const cacheKey = `study_stats_${userId}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+    
     const total = await db.get('SELECT COALESCE(SUM(duration), 0) as total FROM study_sessions WHERE user_id = ?', userId);
     const weekly = await db.get(
-        "SELECT COALESCE(SUM(duration), 0) as weekly FROM study_sessions WHERE user_id = ? AND date >= date('now', '-7 days')",
+        `SELECT COALESCE(SUM(duration), 0) as weekly 
+         FROM study_sessions WHERE user_id = ? AND date >= date('now', '-7 days')`,
         userId
     );
     const today = await db.get(
-        "SELECT COALESCE(SUM(duration), 0) as today FROM study_sessions WHERE user_id = ? AND date = date('now')",
+        `SELECT COALESCE(SUM(duration), 0) as today 
+         FROM study_sessions WHERE user_id = ? AND date = date('now')`,
         userId
     );
-    return { total: total.total, weekly: weekly.weekly, today: today.today };
+    const result = { total: total.total, weekly: weekly.weekly, today: today.today };
+    cache.set(cacheKey, result);
+    return result;
 }
 
-// ICS Import
+// ==================== ICS IMPORT ====================
 async function importICSFromUrl(userId, url, timezone) {
     try {
-        const response = await axios.get(url, { timeout: 30000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+        const response = await axios.get(url, { 
+            timeout: 30000, 
+            headers: { 'User-Agent': 'Mozilla/5.0' } 
+        });
         const cal = ical.parseICS(response.data);
         let count = 0;
         
@@ -2044,7 +2244,7 @@ async function importICSFromUrl(userId, url, timezone) {
             if (event.type === 'VEVENT' && event.start) {
                 const startDate = new Date(event.start);
                 const endDate = event.end ? new Date(event.end) : new Date(startDate.getTime() + 3600000);
-                const day = startDate.getDay();
+                let day = startDate.getDay();
                 const weekday = day === 0 ? 6 : day - 1;
                 
                 await addClass(
@@ -2069,53 +2269,23 @@ async function importICSFromUrl(userId, url, timezone) {
 // ==================== HELPER FUNCTIONS ====================
 function detectLanguage(text) {
     if (!text) return 'en';
-    
-    // Check for Chinese characters
     if (/[\u4e00-\u9fff]/.test(text)) return 'zh';
-    
-    // Check for Cyrillic
     if (/[а-яА-Я]/.test(text)) return 'ru';
-    
-    // Default to English
     return 'en';
 }
 
-function getTranslation(userId, key, params = {}) {
-    const lang = getUserLanguage(userId) || 'en';
-    let text = TRANSLATIONS[lang]?.[key] || TRANSLATIONS.en[key] || key;
-    
-    for (const [k, v] of Object.entries(params)) {
-        text = text.replace(new RegExp(`{${k}}`, 'g'), v);
-    }
-    return text;
+function createProgressBar(percentage, length = 10) {
+    const filled = Math.floor(percentage / 100 * length);
+    return '█'.repeat(filled) + '░'.repeat(length - filled);
 }
 
-function getDayNames(lang) {
-    return TRANSLATIONS[lang]?.days || TRANSLATIONS.en.days;
-}
-
-function getMotivation(lang) {
-    if (lang === 'ru') return MOTIVATION_RU[Math.floor(Math.random() * MOTIVATION_RU.length)];
-    if (lang === 'zh') return MOTIVATION_ZH[Math.floor(Math.random() * MOTIVATION_ZH.length)];
-    return MOTIVATION_EN[Math.floor(Math.random() * MOTIVATION_EN.length)];
-}
-
-function getJoke(lang) {
-    if (lang === 'ru') return JOKES_RU[Math.floor(Math.random() * JOKES_RU.length)];
-    if (lang === 'zh') return JOKES_ZH[Math.floor(Math.random() * JOKES_ZH.length)];
-    return JOKES_EN[Math.floor(Math.random() * JOKES_EN.length)];
-}
-
-function createProgressBar(percentage) {
-    const filled = Math.floor(percentage / 10);
-    const empty = 10 - filled;
-    return '█'.repeat(filled) + '░'.repeat(empty);
+function getRandomItem(arr) {
+    return arr[Math.floor(Math.random() * arr.length)];
 }
 
 // ==================== VK BOT SETUP ====================
 const vk = new VK({ token: VK_TOKEN });
 
-// Create keyboards
 function getMainKeyboard(lang) {
     const keyboard = Keyboard.builder();
     
@@ -2160,14 +2330,14 @@ function getMainKeyboard(lang) {
     return keyboard;
 }
 
-// Send message helper
 async function sendMessage(userId, text, keyboard = null) {
     try {
+        const lang = await getUserLanguage(userId);
         await vk.api.messages.send({
             user_id: userId,
-            message: text,
+            message: text.slice(0, 4096),
             random_id: Math.floor(Math.random() * 1000000000),
-            keyboard: keyboard ? keyboard : getMainKeyboard(await getUserLanguage(userId))
+            keyboard: keyboard ? keyboard : getMainKeyboard(lang)
         });
     } catch (error) {
         console.error('Send message error:', error);
@@ -2225,7 +2395,7 @@ async function handleMessage(userId, text, attachments) {
     }
     
     // Mark attendance
-    if (text === '✅ Mark' || text === '✅ Отметить' || text === '✅ 标记' || text === 'Mark' || text === 'Отметить') {
+    if (text === '✅ Mark' || text === '✅ Отметить' || text === '✅ 标记' || text === 'Mark' || text === 'Отметить' || text === '标记') {
         const classes = await getTodayClasses(userId, TIMEZONE);
         if (classes.length > 0) {
             const classList = classes.map((c, i) => `${i + 1}. ${c.subject} (${c.start_time}-${c.end_time})`).join('\n');
@@ -2262,7 +2432,8 @@ async function handleMessage(userId, text, attachments) {
     if (text.includes('.ics') && (text.includes('http://') || text.includes('https://'))) {
         const urlMatch = text.match(/(https?:\/\/[^\s]+\.ics)/i);
         if (urlMatch) {
-            await sendMessage(userId, '⏳ ' + (lang === 'ru' ? 'Импортирую расписание...' : lang === 'zh' ? '正在导入课程表...' : 'Importing your schedule...'));
+            const loadingMsg = lang === 'ru' ? 'Импортирую расписание...' : lang === 'zh' ? '正在导入课程表...' : 'Importing your schedule...';
+            await sendMessage(userId, `⏳ ${loadingMsg}`);
             const count = await importICSFromUrl(userId, urlMatch[0], TIMEZONE);
             if (count > 0) {
                 await sendMessage(userId, getTranslation(userId, 'import_success', { count, name: name || '' }));
@@ -2277,7 +2448,8 @@ async function handleMessage(userId, text, attachments) {
     if (text.startsWith('/ics')) {
         const parts = text.split(/\s+/);
         if (parts.length === 2 && parts[1].startsWith('http')) {
-            await sendMessage(userId, '⏳ ' + (lang === 'ru' ? 'Импортирую...' : lang === 'zh' ? '正在导入...' : 'Importing...'));
+            const loadingMsg = lang === 'ru' ? 'Импортирую...' : lang === 'zh' ? '正在导入...' : 'Importing...';
+            await sendMessage(userId, `⏳ ${loadingMsg}`);
             const count = await importICSFromUrl(userId, parts[1], TIMEZONE);
             if (count > 0) {
                 await sendMessage(userId, getTranslation(userId, 'import_success', { count, name: name || '' }));
@@ -2328,7 +2500,7 @@ async function handleMessage(userId, text, attachments) {
         
         const prodBar = createProgressBar(productivityScore);
         const attendBar = createProgressBar(attendanceRate);
-        const motivation = getMotivation(lang);
+        const motivation = getRandomItem(MOTIVATIONS[lang]);
         
         let message = getTranslation(userId, 'stats_header', { name: name || '' });
         message += getTranslation(userId, 'task_stats', {
@@ -2478,7 +2650,8 @@ async function handleMessage(userId, text, attachments) {
     
     // Joke
     if (textLower.includes('joke') || textLower.includes('шутка') || textLower.includes('笑话')) {
-        await sendMessage(userId, getTranslation(userId, 'joke', { name: name || '', joke: getJoke(lang) }));
+        const joke = getRandomItem(JOKES[lang]);
+        await sendMessage(userId, getTranslation(userId, 'joke', { name: name || '', joke }));
         return;
     }
     
@@ -2493,19 +2666,19 @@ async function handleMessage(userId, text, attachments) {
 }
 
 // ==================== REMINDER SYSTEM ====================
-async function checkReminders() {
+async function checkClassReminders() {
     try {
-        const users = await db.all('SELECT DISTINCT vk_id FROM users');
         const now = new Date(new Date().toLocaleString('en-US', { timeZone: TIMEZONE }));
         const currentDay = now.getDay();
         const weekday = currentDay === 0 ? 6 : currentDay - 1;
+        
+        const users = await db.all('SELECT DISTINCT vk_id FROM users');
         
         for (const user of users) {
             const userId = user.vk_id;
             const userInfo = await getUser(userId);
             const name = userInfo?.name || 'friend';
             const lang = userInfo?.language || 'en';
-            const reminderOffset = userInfo?.reminder_offset || 75;
             
             const classes = await db.all(
                 'SELECT subject, start_time FROM schedule WHERE user_id = ? AND day = ?',
@@ -2518,7 +2691,7 @@ async function checkReminders() {
                 classTime.setHours(hour, minute, 0, 0);
                 const minutesUntil = (classTime - now) / 60000;
                 
-                if (minutesUntil >= 60 && minutesUntil <= reminderOffset) {
+                if (minutesUntil >= 60 && minutesUntil <= 75) {
                     const reminderKey = `reminder_${userId}_${currentDay}_${cls.start_time}`;
                     const existing = await db.get('SELECT sent FROM reminders WHERE key = ?', reminderKey);
                     
@@ -2535,7 +2708,90 @@ async function checkReminders() {
             }
         }
     } catch (error) {
-        console.error('Reminder check error:', error);
+        console.error('Class reminder error:', error);
+    }
+}
+
+async function checkFirstClassAlarm() {
+    try {
+        const now = new Date(new Date().toLocaleString('en-US', { timeZone: TIMEZONE }));
+        const currentDay = now.getDay();
+        const weekday = currentDay === 0 ? 6 : currentDay - 1;
+        
+        const users = await db.all('SELECT DISTINCT vk_id FROM schedule');
+        
+        for (const user of users) {
+            const userId = user.vk_id;
+            
+            const classes = await db.all(
+                'SELECT subject, start_time FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time',
+                userId, weekday
+            );
+            
+            if (classes.length > 0) {
+                const firstClass = classes[0];
+                const [hour, minute] = firstClass.start_time.split(':').map(Number);
+                const classTime = new Date(now);
+                classTime.setHours(hour, minute, 0, 0);
+                const minutesUntil = (classTime - now) / 60000;
+                
+                if (minutesUntil >= 58 && minutesUntil <= 62) {
+                    const alarmKey = `first_class_${userId}_${now.toDateString()}`;
+                    const existing = await db.get('SELECT sent FROM reminders WHERE key = ?', alarmKey);
+                    
+                    if (!existing) {
+                        const userInfo = await getUser(userId);
+                        const name = userInfo?.name || 'friend';
+                        const alarmMsg = getTranslation(userId, 'first_class_alarm', {
+                            name, subject: firstClass.subject,
+                            time: firstClass.start_time,
+                            minutes: Math.round(minutesUntil)
+                        });
+                        await sendMessage(userId, alarmMsg);
+                        await db.run('INSERT INTO reminders (key, sent) VALUES (?, 1)', alarmKey);
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error('First class alarm error:', error);
+    }
+}
+
+async function checkDeadlineReminders() {
+    try {
+        const now = new Date();
+        const todayStr = now.toISOString().split('T')[0];
+        
+        const tasks = await db.all(
+            `SELECT id, user_id, task, due_date, remind_days 
+             FROM tasks WHERE done = 0 AND due_date <= date(?, '+? days')`,
+            todayStr, 3
+        );
+        
+        for (const task of tasks) {
+            const dueDate = new Date(task.due_date);
+            const daysLeft = Math.ceil((dueDate - now) / (1000 * 60 * 60 * 24));
+            
+            if (daysLeft <= task.remind_days && daysLeft >= 0) {
+                const reminderKey = `deadline_${task.id}_${daysLeft}`;
+                const existing = await db.get('SELECT sent FROM reminders WHERE key = ?', reminderKey);
+                
+                if (!existing) {
+                    const userInfo = await getUser(task.user_id);
+                    const name = userInfo?.name || 'friend';
+                    const reminderMsg = getTranslation(task.user_id, 'deadline_reminder', {
+                        name, task: task.task,
+                        due_date: task.due_date.split(' ')[0],
+                        days_left: daysLeft
+                    });
+                    await sendMessage(task.user_id, reminderMsg);
+                    await db.run('INSERT INTO reminders (key, sent) VALUES (?, 1)', reminderKey);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Deadline reminder error:', error);
     }
 }
 
@@ -2543,42 +2799,44 @@ async function checkReminders() {
 async function startBot() {
     await initDatabase();
     
-    // Schedule reminder checks every 5 minutes
+    // Schedule reminder checks
     cron.schedule('*/5 * * * *', () => {
-        checkReminders().catch(console.error);
+        checkClassReminders().catch(console.error);
+        checkFirstClassAlarm().catch(console.error);
     });
     
-    // Schedule daily stats reset at midnight
-    cron.schedule('0 0 * * *', () => {
-        console.log('Daily stats reset not needed - keeping history');
+    cron.schedule('*/30 * * * *', () => {
+        checkDeadlineReminders().catch(console.error);
     });
     
-    console.log('='.repeat(60));
-    console.log('🤖 VK Smart Assistant Bot - Ultimate Edition');
-    console.log('='.repeat(60));
-    console.log('✅ Features:');
-    console.log('   • English, Russian, Chinese (auto-detects)');
-    console.log('   • Schedule management with ICS import');
-    console.log('   • Task tracking with priorities');
-    console.log('   • Class attendance tracking');
-    console.log('   • Study time logging');
-    console.log('   • Complete statistics with progress bars');
-    console.log('   • 60-90 minute class reminders');
-    console.log('   • Motivational messages');
-    console.log('='.repeat(60));
+    console.log('='.repeat(70));
+    console.log('🤖 VK SMART ASSISTANT BOT - ULTIMATE NODE.JS EDITION');
+    console.log('='.repeat(70));
+    console.log('✅ ENHANCED FEATURES:');
+    console.log('   • 🌐 Multi-language: English, Русский, 中文 (auto-detect)');
+    console.log('   • 📅 Complete schedule management with ICS import');
+    console.log('   • 📝 Task tracking with priorities (high/medium/normal)');
+    console.log('   • ✅ Class attendance tracking');
+    console.log('   • ⏱️ Study time logging');
+    console.log('   • 📊 Comprehensive statistics with progress bars');
+    console.log('   • ⏰ Smart reminders: 60-75 min before class');
+    console.log('   • 🔔 First class daily alarm (60 minutes before)');
+    console.log('   • 📧 Deadline reminders');
+    console.log('   • 💾 SQLite with WAL mode & caching for speed');
+    console.log('='.repeat(70));
     console.log('✅ Bot is running and waiting for messages...');
     console.log('💬 Supports: English | Русский | 中文');
-    console.log('📥 Send ICS link or file to import schedule');
-    console.log('='.repeat(60));
+    console.log('📥 Send ICS link or attach .ics file to import schedule');
+    console.log('='.repeat(70));
     
-    // Start long polling
+    // Handle file attachments
     vk.updates.on('message_new', async (context) => {
         try {
             const userId = context.senderId;
             const text = context.text || '';
             const attachments = context.messageAttachments || [];
             
-            // Handle file attachments
+            // Handle ICS file attachment
             const icsAttachment = attachments.find(att => 
                 att.type === 'doc' && att.doc?.title?.endsWith('.ics')
             );
@@ -2588,7 +2846,8 @@ async function startBot() {
                 const user = await getUser(userId);
                 const lang = user?.language || 'en';
                 const name = user?.name || '';
-                await context.send('⏳ ' + (lang === 'ru' ? 'Импортирую файл...' : lang === 'zh' ? '正在导入文件...' : 'Importing file...'));
+                const loadingMsg = lang === 'ru' ? 'Импортирую файл...' : lang === 'zh' ? '正在导入文件...' : 'Importing file...';
+                await context.send(`⏳ ${loadingMsg}`);
                 const count = await importICSFromUrl(userId, url, TIMEZONE);
                 if (count > 0) {
                     await context.send(getTranslation(userId, 'import_success', { count, name }));
@@ -2605,7 +2864,7 @@ async function startBot() {
     });
     
     await vk.updates.start().catch(console.error);
-    console.log('✅ Long polling started');
+    console.log('✅ Long polling started successfully');
 }
 
 startBot().catch(console.error);
