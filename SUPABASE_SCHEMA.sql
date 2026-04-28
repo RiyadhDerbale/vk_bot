@@ -112,62 +112,65 @@ CREATE POLICY "Allow service role" ON study_logs
 
 
 
-  -- Users table
-CREATE TABLE IF NOT EXISTS users (
+
+
+
+
+
+-- Create tables
+CREATE TABLE users (
   vk_id BIGINT PRIMARY KEY,
-  name TEXT,
+  name TEXT DEFAULT '',
   language TEXT DEFAULT 'en',
   reminder_offset INTEGER DEFAULT 60,
-  created_at TIMESTAMP DEFAULT NOW()
+  join_date TIMESTAMP DEFAULT NOW()
 );
 
--- Schedule table
-CREATE TABLE IF NOT EXISTS schedule (
+CREATE TABLE schedule (
   id SERIAL PRIMARY KEY,
-  user_id BIGINT,
+  user_id BIGINT REFERENCES users(vk_id),
   subject TEXT,
   day INTEGER,
   start_time TEXT,
   end_time TEXT,
-  location TEXT DEFAULT '',
-  created_at TIMESTAMP DEFAULT NOW()
+  location TEXT
 );
 
--- Tasks table
-CREATE TABLE IF NOT EXISTS tasks (
+CREATE TABLE tasks (
   id SERIAL PRIMARY KEY,
-  user_id BIGINT,
+  user_id BIGINT REFERENCES users(vk_id),
   task TEXT,
   due_date TIMESTAMP,
   remind_days INTEGER,
   priority TEXT DEFAULT 'normal',
-  done INTEGER DEFAULT 0,
-  completed_date TIMESTAMP,
-  created_at TIMESTAMP DEFAULT NOW()
+  done BOOLEAN DEFAULT FALSE,
+  completed_at TIMESTAMP
 );
 
--- Attendance table
-CREATE TABLE IF NOT EXISTS attendance (
+CREATE TABLE attendance (
   id SERIAL PRIMARY KEY,
-  user_id BIGINT,
+  user_id BIGINT REFERENCES users(vk_id),
   class_name TEXT,
   date DATE,
-  attended INTEGER DEFAULT 1,
+  attended BOOLEAN,
   UNIQUE(user_id, class_name, date)
 );
 
--- Daily statistics table
-CREATE TABLE IF NOT EXISTS daily_stats (
+CREATE TABLE study_sessions (
   id SERIAL PRIMARY KEY,
-  user_id BIGINT,
-  date DATE,
-  tasks_completed INTEGER DEFAULT 0,
-  classes_attended INTEGER DEFAULT 0,
-  UNIQUE(user_id, date)
+  user_id BIGINT REFERENCES users(vk_id),
+  subject TEXT,
+  duration INTEGER,
+  date DATE
 );
 
--- Reminders log
-CREATE TABLE IF NOT EXISTS reminders (
+CREATE TABLE reminders (
   key TEXT PRIMARY KEY,
-  created_at TIMESTAMP DEFAULT NOW()
+  sent INTEGER DEFAULT 1,
+  reminder_time TIMESTAMP DEFAULT NOW()
 );
+
+-- Create indexes
+CREATE INDEX idx_schedule_user_day ON schedule(user_id, day);
+CREATE INDEX idx_tasks_user_done ON tasks(user_id, done);
+CREATE INDEX idx_attendance_user_date ON attendance(user_id, date);
