@@ -108,3 +108,66 @@ CREATE POLICY "Allow service role" ON study_logs
   FOR ALL USING (true)
   WITH CHECK (true);
   
+
+
+
+
+  -- Users table
+CREATE TABLE IF NOT EXISTS users (
+  vk_id BIGINT PRIMARY KEY,
+  name TEXT,
+  language TEXT DEFAULT 'en',
+  reminder_offset INTEGER DEFAULT 60,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Schedule table
+CREATE TABLE IF NOT EXISTS schedule (
+  id SERIAL PRIMARY KEY,
+  user_id BIGINT,
+  subject TEXT,
+  day INTEGER,
+  start_time TEXT,
+  end_time TEXT,
+  location TEXT DEFAULT '',
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Tasks table
+CREATE TABLE IF NOT EXISTS tasks (
+  id SERIAL PRIMARY KEY,
+  user_id BIGINT,
+  task TEXT,
+  due_date TIMESTAMP,
+  remind_days INTEGER,
+  priority TEXT DEFAULT 'normal',
+  done INTEGER DEFAULT 0,
+  completed_date TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Attendance table
+CREATE TABLE IF NOT EXISTS attendance (
+  id SERIAL PRIMARY KEY,
+  user_id BIGINT,
+  class_name TEXT,
+  date DATE,
+  attended INTEGER DEFAULT 1,
+  UNIQUE(user_id, class_name, date)
+);
+
+-- Daily statistics table
+CREATE TABLE IF NOT EXISTS daily_stats (
+  id SERIAL PRIMARY KEY,
+  user_id BIGINT,
+  date DATE,
+  tasks_completed INTEGER DEFAULT 0,
+  classes_attended INTEGER DEFAULT 0,
+  UNIQUE(user_id, date)
+);
+
+-- Reminders log
+CREATE TABLE IF NOT EXISTS reminders (
+  key TEXT PRIMARY KEY,
+  created_at TIMESTAMP DEFAULT NOW()
+);
