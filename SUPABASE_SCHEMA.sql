@@ -175,3 +175,28 @@ CREATE INDEX idx_schedule_user_day ON schedule(user_id, day);
 CREATE INDEX idx_tasks_user_done ON tasks(user_id, done);
 CREATE INDEX idx_attendance_user_date ON attendance(user_id, date);
 CREATE INDEX idx_study_user_date ON study_sessions(user_id, date);
+
+
+
+
+
+
+
+-- Create tables if they don't exist
+CREATE TABLE IF NOT EXISTS users (
+  vk_id BIGINT PRIMARY KEY,
+  name TEXT DEFAULT '',
+  language TEXT DEFAULT 'en',
+  reminder_offset INTEGER DEFAULT 60,
+  join_date TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS schedule (
+  id SERIAL PRIMARY KEY,
+  user_id BIGINT REFERENCES users(vk_id),
+  subject TEXT,
+  day INTEGER,
+  start_time TEXT,
+  end_time TEXT,
+  location TEXT
+);
