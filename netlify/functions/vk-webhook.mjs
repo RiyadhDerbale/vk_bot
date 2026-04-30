@@ -3267,14 +3267,14 @@ async function getSchedule(userId) {
   return error ? [] : (data || []);
 }
 
-// ==================== WORKING ICS IMPORT ====================
+// ==================== NATIVE ICS PARSER (NO EXTERNAL LIBRARY) ====================
 
-async function importICSFromUrl(userId, url) {
+async function importICSFromUrlNative(userId, url) {
   console.log(`[ICS] Starting import from: ${url}`);
   
   try {
-    // FIRST: Try to download as is
-    let response = await fetch(url, {
+    // Download the file
+    const response = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'text/calendar, application/octet-stream, */*'
@@ -3282,105 +3282,147 @@ async function importICSFromUrl(userId, url) {
     });
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
     
-    let content = await response.text();
-    console.log(`[ICS] Downloaded ${content.length} bytes`);
+    const icsText = await response.text();
+    console.log(`[ICS] Downloaded ${icsText.length} bytes`);
     
-    // SECOND: If it's HTML, try to find ICS link
-    if (content.includes('<!DOCTYPE html>') || content.includes('<html')) {
-      console.log(`[ICS] Detected HTML, searching for ICS link...`);
-      
-      // Look for .ics file in the HTML
-      const icsMatches = content.match(/https?:\/\/[^\s"']+\.ics/gi);
-      if (icsMatches && icsMatches.length > 0) {
-        const icsUrl = icsMatches[0];
-        console.log(`[ICS] Found ICS link: ${icsUrl}`);
-        
-        // Download the actual ICS file
-        response = await fetch(icsUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0',
-            'Accept': 'text/calendar'
-          }
-        });
-        content = await response.text();
-      } else {
-        // Try to find relative links
-        const relativeMatches = content.match(/href=["']([^"']+\.ics)["']/gi);
-        if (relativeMatches && relativeMatches.length > 0) {
-          const relativeMatch = relativeMatches[0].match(/href=["']([^"']+\.ics)["']/i);
-          if (relativeMatch) {
-            const baseUrl = new URL(url);
-            const icsUrl = new URL(relativeMatch[1], baseUrl.origin).href;
-            console.log(`[ICS] Found relative ICS link: ${icsUrl}`);
-            
-            response = await fetch(icsUrl, {
-              headers: {
-                'User-Agent': 'Mozilla/5.0',
-                'Accept': 'text/calendar'
-              }
-            });
-            content = await response.text();
-          }
-        }
+    // Check if it's actually HTML
+    if (icsText.includes('<!DOCTYPE html>') || icsText.includes('<html')) {
+      // Try to extract ICS link from HTML
+      const linkMatch = icsText.match(/https?:\/\/[^\s"']+\.ics/i);
+      if (linkMatch) {
+        console.log(`[ICS] Found ICS link in HTML: ${linkMatch[0]}`);
+        return importICSFromUrlNative(userId, linkMatch[0]);
       }
+      throw new Error('URL returned HTML, not ICS file');
     }
     
-    // THIRD: Check if we have valid ICS
-    if (!content.includes('BEGIN:VCALENDAR')) {
-      console.log(`[ICS] Not valid ICS, first 200 chars: ${content.substring(0, 200)}`);
-      throw new Error('Not a valid ICS file');
-    }
-    
-    // FOURTH: Parse ICS
-    const parsed = ical.parseICS(content);
+    // Parse ICS manually
     const events = [];
+    const lines = icsText.split(/\r?\n/);
     
-    for (const key in parsed) {
-      const event = parsed[key];
-      if (event.type === 'VEVENT' && event.start) {
-        events.push({
-          summary: event.summary || 'Class',
-          start: event.start,
-          end: event.end,
-          location: event.location || ''
-        });
+    let currentEvent = null;
+    let inEvent = false;
+    
+    for (let i = 0; i < lines.length; i++) {
+      let line = lines[i].trim();
+      
+      // Handle line continuations
+      while (i + 1 < lines.length && (lines[i + 1].startsWith(' ') || lines[i + 1].startsWith('\t'))) {
+        line += lines[i + 1].trim();
+        i++;
+      }
+      
+      if (line === 'BEGIN:VEVENT') {
+        currentEvent = {};
+        inEvent = true;
+      } else if (line === 'END:VEVENT' && currentEvent) {
+        if (currentEvent.SUMMARY && currentEvent.DTSTART) {
+          events.push(currentEvent);
+        }
+        currentEvent = null;
+        inEvent = false;
+      } else if (inEvent && currentEvent) {
+        const colonIndex = line.indexOf(':');
+        if (colonIndex > 0) {
+          let key = line.substring(0, colonIndex);
+          let value = line.substring(colonIndex + 1);
+          
+          // Remove parameters from key (e.g., "DTSTART;TZID=..." -> "DTSTART")
+          const semicolonIndex = key.indexOf(';');
+          if (semicolonIndex > 0) {
+            key = key.substring(0, semicolonIndex);
+          }
+          
+          currentEvent[key] = value;
+        }
       }
     }
     
     console.log(`[ICS] Found ${events.length} events`);
     
     if (events.length === 0) {
-      return { success: false, count: 0, error: "No events found" };
+      return { success: false, count: 0, error: "No events found in ICS file" };
     }
     
-    // FIFTH: Import events
+    // Import events
     let imported = 0;
+    
     for (const event of events) {
       try {
-        let startDate = event.start instanceof Date ? event.start : new Date(event.start);
-        if (isNaN(startDate.getTime())) continue;
+        // Parse DTSTART
+        let startDate = null;
+        let startValue = event.DTSTART;
         
-        // Calculate day (0=Monday, 6=Sunday)
+        // Handle different date formats
+        if (startValue) {
+          // Format: 20231215T143000Z
+          let match = startValue.match(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/);
+          if (match) {
+            const [, year, month, day, hour, minute, second] = match;
+            startDate = new Date(Date.UTC(
+              parseInt(year), parseInt(month) - 1, parseInt(day),
+              parseInt(hour), parseInt(minute), parseInt(second || 0)
+            ));
+          } else {
+            // Format: YYYYMMDD (all day event)
+            match = startValue.match(/(\d{4})(\d{2})(\d{2})/);
+            if (match) {
+              const [, year, month, day] = match;
+              startDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+            }
+          }
+        }
+        
+        if (!startDate || isNaN(startDate.getTime())) {
+          console.log(`[ICS] Skipping event - invalid date: ${event.SUMMARY}`);
+          continue;
+        }
+        
+        // Calculate day of week (0 = Monday, 6 = Sunday)
         let dayOfWeek = startDate.getDay();
-        if (dayOfWeek === 0) dayOfWeek = 6;
-        else dayOfWeek = dayOfWeek - 1;
+        if (dayOfWeek === 0) {
+          dayOfWeek = 6; // Sunday -> 6
+        } else {
+          dayOfWeek = dayOfWeek - 1; // Monday=0
+        }
         
+        // Format time
         const startTimeStr = `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
         
-        let endDate;
-        if (event.end) {
-          endDate = event.end instanceof Date ? event.end : new Date(event.end);
-        } else {
+        // Parse DTEND or default to +90 min
+        let endDate = null;
+        if (event.DTEND) {
+          let match = event.DTEND.match(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/);
+          if (match) {
+            const [, year, month, day, hour, minute, second] = match;
+            endDate = new Date(Date.UTC(
+              parseInt(year), parseInt(month) - 1, parseInt(day),
+              parseInt(hour), parseInt(minute), parseInt(second || 0)
+            ));
+          }
+        }
+        
+        if (!endDate || isNaN(endDate.getTime())) {
           endDate = new Date(startDate.getTime() + 90 * 60 * 1000);
         }
+        
         const endTimeStr = `${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}`;
         
-        let subject = event.summary.replace(/<[^>]*>/g, '').trim();
-        let location = (event.location || '').replace(/<[^>]*>/g, '').trim();
+        // Clean up subject
+        let subject = event.SUMMARY || 'Untitled Class';
+        subject = subject.replace(/\\,/g, ',').replace(/\\n/g, ' ').trim();
+        if (subject.length > 100) subject = subject.substring(0, 100);
         
+        // Get location
+        let location = event.LOCATION || '';
+        location = location.replace(/\\,/g, ',').trim();
+        
+        console.log(`[ICS] Importing: ${subject} on day ${dayOfWeek} at ${startTimeStr}`);
+        
+        // Add to database
         const added = await addClassToDB(userId, subject, dayOfWeek, startTimeStr, endTimeStr, location);
         if (added) imported++;
         
@@ -3388,6 +3430,8 @@ async function importICSFromUrl(userId, url) {
         console.error(`[ICS] Error importing event:`, err);
       }
     }
+    
+    console.log(`[ICS] Imported ${imported} classes`);
     
     return { success: imported > 0, count: imported };
     
@@ -3492,31 +3536,32 @@ Need help? Send a message!`;
     return;
   }
   
-  // ICS IMPORT - MAIN
-  if (lowText.startsWith("/ics")) {
-    const parts = text.split(" ");
-    if (parts.length >= 2) {
-      const icsUrl = parts[1];
+    // DEBUG - Show raw response
+  if (lowText === "/debug_url") {
+    const testUrl = "https://raw.githubusercontent.com/ical-org/ical.js/master/test/calendars/event.ics";
+    
+    await sendMessage(userId, "🔍 **Fetching URL...**\n\nPlease wait.", getMainKeyboard());
+    
+    try {
+      const response = await fetch(testUrl);
+      const text = await response.text();
       
-      await sendMessage(userId, "⏳ **Importing calendar...**\n\nThis may take up to 30 seconds.\nPlease wait...", getMainKeyboard());
+      let msg = `📥 **Response Analysis**\n\n`;
+      msg += `Status: ${response.status}\n`;
+      msg += `Size: ${text.length} bytes\n`;
+      msg += `Is ICS: ${text.includes('BEGIN:VCALENDAR') ? 'YES ✅' : 'NO ❌'}\n\n`;
       
-      console.log(`[${userId}] Importing: ${icsUrl}`);
-      const result = await importICSFromUrl(userId, icsUrl);
-      
-      if (result.success && result.count > 0) {
-        await sendMessage(userId, `✅ **Success!**\n\nImported **${result.count}** classes into your schedule!\n\nType "Schedule" to see them.`, getMainKeyboard());
+      if (text.includes('BEGIN:VCALENDAR')) {
+        msg += `✅ The URL returns valid ICS!\n\n`;
+        msg += `First 300 chars:\n${text.substring(0, 300)}`;
       } else {
-        let msg = `❌ **Import failed**\n\n`;
-        msg += `Error: ${result.error || "Unknown error"}\n\n`;
-        msg += `💡 **Try this instead:**\n`;
-        msg += `1. Download the ICS file from the URL\n`;
-        msg += `2. Send the .ics file directly in this chat\n`;
-        msg += `3. Or add classes manually with /add\n\n`;
-        msg += `Need the URL to download? Open it in your browser.`;
-        await sendMessage(userId, msg, getMainKeyboard());
+        msg += `❌ Not a valid ICS file.\n\n`;
+        msg += `First 300 chars:\n${text.substring(0, 300)}`;
       }
-    } else {
-      await sendMessage(userId, "📥 **Usage:**\n`/ics <url>`\n\nExample: `/ics https://table.nsu.ru/ics/group/25124`\n\n💡 **If this doesn't work:** Download the .ics file and attach it directly to this chat.", getMainKeyboard());
+      
+      await sendMessage(userId, msg, getMainKeyboard());
+    } catch (err) {
+      await sendMessage(userId, `❌ Error: ${err.message}`, getMainKeyboard());
     }
     return;
   }
