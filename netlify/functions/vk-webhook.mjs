@@ -106,18 +106,17 @@ Attach .ics file directly
     remind_set: "⏰ I'll remind you {minutes} minutes before each class.",
     remind_current: "⏰ Current reminder: {minutes} minutes before class.",
     
-    import_start: "⏳ Importing calendar... This may take a moment.",
-    import_parsing: "📋 Parsing {count} events from calendar...",
-    import_done: "✅ Successfully imported {count} classes!\n\n📊 Summary:\n• Total events found: {total}\n• New classes added: {count}\n• Duplicates skipped: {duplicates}\n\nType 'Schedule' to view your updated schedule!",
+    import_start: "⏳ Downloading and parsing calendar file...",
+    import_parsing: "📋 Found {count} events. Importing to your schedule...",
+    import_done: "✅ Successfully imported {count} classes!\n\n📊 Summary:\n• Total events: {total}\n• New classes: {count}\n• Duplicates: {duplicates}\n\nType 'Schedule' to view!",
     import_fail: "❌ Import failed: {error}",
-    import_no_events: "❌ No valid events found in the ICS file. Make sure the file contains calendar events.",
+    import_no_events: "❌ No valid events found in the file.",
     
     stats: "📊 *Your Stats*\n📚 Classes: {total_classes}\n📝 Tasks: {completed_done}/{total_tasks} done\n⏱️ Study: {study_min} min this week",
     
     unknown: "I don't understand. Type 'Help' to see commands.",
     
     weekdays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
-    weekdays_short: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
   },
   
   ru: {
@@ -185,18 +184,17 @@ Stats - Посмотреть статистику
     remind_set: "⏰ Буду напоминать за {minutes} минут до пары.",
     remind_current: "⏰ Напоминание: за {minutes} минут до пары.",
     
-    import_start: "⏳ Импортирую расписание... Это займёт немного времени.",
-    import_parsing: "📋 Обрабатываю {count} событий из календаря...",
-    import_done: "✅ Успешно импортировано {count} пар!\n\n📊 Сводка:\n• Всего событий: {total}\n• Добавлено новых: {count}\n• Пропущено дубликатов: {duplicates}\n\nНапиши 'Schedule' чтобы посмотреть обновлённое расписание!",
+    import_start: "⏳ Скачиваю и обрабатываю файл календаря...",
+    import_parsing: "📋 Найдено {count} событий. Импортирую в расписание...",
+    import_done: "✅ Успешно импортировано {count} пар!\n\n📊 Сводка:\n• Всего событий: {total}\n• Новых пар: {count}\n• Дубликатов: {duplicates}\n\nНапиши 'Schedule' чтобы посмотреть!",
     import_fail: "❌ Ошибка импорта: {error}",
-    import_no_events: "❌ Не найдено событий в ICS файле. Убедись что файл содержит события календаря.",
+    import_no_events: "❌ В файле не найдено событий.",
     
     stats: "📊 *Статистика*\n📚 Пары: {total_classes}\n📝 Задачи: {completed_done}/{total_tasks} выполнено\n⏱️ Учёба: {study_min} мин на неделе",
     
     unknown: "Я не понял. Напиши 'Help' для списка команд.",
     
     weekdays: ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"],
-    weekdays_short: ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
   },
   
   zh: {
@@ -264,18 +262,17 @@ Stats - 查看统计
     remind_set: "⏰ 我会在课前 {minutes} 分钟提醒。",
     remind_current: "⏰ 当前提醒: 课前 {minutes} 分钟。",
     
-    import_start: "⏳ 正在导入日历... 这可能需要一点时间。",
-    import_parsing: "📋 正在处理 {count} 个事件...",
-    import_done: "✅ 成功导入 {count} 节课！\n\n📊 摘要:\n• 发现事件: {total}\n• 新增课程: {count}\n• 跳过重复: {duplicates}\n\n输入 'Schedule' 查看更新后的课程表！",
+    import_start: "⏳ 正在下载和解析日历文件...",
+    import_parsing: "📋 找到 {count} 个事件。正在导入...",
+    import_done: "✅ 成功导入 {count} 节课！\n\n📊 摘要:\n• 总事件: {total}\n• 新增: {count}\n• 重复: {duplicates}\n\n输入 'Schedule' 查看！",
     import_fail: "❌ 导入失败: {error}",
-    import_no_events: "❌ ICS文件中没有找到有效事件。请确保文件包含日历事件。",
+    import_no_events: "❌ 文件中没有找到有效事件。",
     
     stats: "📊 *统计*\n📚 课程: {total_classes}\n📝 任务: {completed_done}/{total_tasks} 已完成\n⏱️ 学习: {study_min} 分钟本周",
     
     unknown: "我不明白。输入'Help'查看命令。",
     
     weekdays: ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"],
-    weekdays_short: ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
   }
 };
 
@@ -332,9 +329,7 @@ async function getUserLang(userId) {
   return user?.language || "en";
 }
 
-// ===== FIXED: Get classes with proper caching =====
 async function getClasses(userId) {
-  // Skip cache for now to ensure fresh data after import
   const { data, error } = await supabase
     .from("schedule")
     .select("*")
@@ -348,16 +343,12 @@ async function getClasses(userId) {
   }
   
   const result = data || [];
-  console.log(`[DB] Got ${result.length} classes for user ${userId}`);
-  
-  // Cache the fresh data
   setCache(`classes_${userId}`, result);
   return result;
 }
 
-// ===== FIXED: Add class with proper logging =====
 async function addClass(userId, subject, day, startTime, endTime, location = "") {
-  console.log(`[DB] Adding class: ${subject}, day=${day}, ${startTime}-${endTime}, loc=${location}`);
+  console.log(`[DB] Adding: ${subject} | Day ${day} | ${startTime}-${endTime}`);
   
   const { data, error } = await supabase
     .from("schedule")
@@ -372,13 +363,11 @@ async function addClass(userId, subject, day, startTime, endTime, location = "")
     .select();
   
   if (error) {
-    console.error("Add class error:", error);
+    console.error("[DB] Insert error:", error);
     return false;
   }
   
-  console.log(`[DB] Class added successfully, id=${data?.[0]?.id}`);
-  
-  // IMPORTANT: Clear cache so next getClasses returns fresh data
+  console.log(`[DB] Inserted with ID: ${data?.[0]?.id}`);
   clearUserCache(userId);
   return true;
 }
@@ -516,12 +505,6 @@ async function getNextClass(userId) {
   return null;
 }
 
-function calculateDuration(startTime, endTime) {
-  const [sh, sm] = startTime.split(":").map(Number);
-  const [eh, em] = endTime.split(":").map(Number);
-  return (eh * 60 + em) - (sh * 60 + sm);
-}
-
 // ==================== VK API ====================
 async function sendVkMessage(userId, text, keyboard = null) {
   try {
@@ -570,106 +553,193 @@ function getKeyboard(lang) {
   });
 }
 
+// ==================== FIXED ICS PARSER ====================
+function parseICSContent(content) {
+  const events = [];
+  
+  // Normalize line endings
+  content = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  
+  // Unfold folded lines (lines starting with space/tab are continuations)
+  const unfoldedLines = [];
+  for (const line of content.split("\n")) {
+    if (line.match(/^[ \t]/) && unfoldedLines.length > 0) {
+      // This is a continuation of the previous line
+      unfoldedLines[unfoldedLines.length - 1] += line.substring(1);
+    } else {
+      unfoldedLines.push(line);
+    }
+  }
+  
+  let currentEvent = null;
+  let inEvent = false;
+  
+  for (const line of unfoldedLines) {
+    const trimmed = line.trim();
+    
+    if (trimmed === "BEGIN:VEVENT") {
+      currentEvent = {};
+      inEvent = true;
+    } else if (trimmed === "END:VEVENT") {
+      if (currentEvent && currentEvent.DTSTART) {
+        events.push(currentEvent);
+      }
+      currentEvent = null;
+      inEvent = false;
+    } else if (inEvent && currentEvent) {
+      const colonIndex = trimmed.indexOf(":");
+      if (colonIndex > 0) {
+        let key = trimmed.substring(0, colonIndex);
+        let value = trimmed.substring(colonIndex + 1);
+        
+        // Remove parameters from key (like DTSTART;VALUE=DATE)
+        const semicolonIndex = key.indexOf(";");
+        if (semicolonIndex > 0) {
+          key = key.substring(0, semicolonIndex);
+        }
+        
+        // Handle escaped characters
+        value = value.replace(/\\,/g, ",").replace(/\\n/g, "\n").replace(/\\;/g, ";").replace(/\\\\/g, "\\");
+        
+        currentEvent[key] = value;
+      }
+    }
+  }
+  
+  return events;
+}
+
+function parseICSTimestamp(ts) {
+  if (!ts) return null;
+  
+  // Try different ICS date formats
+  // Format 1: 20240115T090000Z
+  let match = ts.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?$/);
+  if (match) {
+    return new Date(Date.UTC(
+      parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]),
+      parseInt(match[4]), parseInt(match[5]), parseInt(match[6])
+    ));
+  }
+  
+  // Format 2: 20240115T090000
+  match = ts.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/);
+  if (match) {
+    return new Date(
+      parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]),
+      parseInt(match[4]), parseInt(match[5]), parseInt(match[6])
+    );
+  }
+  
+  // Format 3: 20240115 (date only)
+  match = ts.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (match) {
+    return new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]));
+  }
+  
+  return null;
+}
+
 // ==================== FIXED ICS IMPORT ====================
 async function importICS(userId, source) {
-  console.log(`[ICS] Starting import for user ${userId}`);
+  console.log(`[ICS] Starting import from: ${typeof source === 'string' ? source.substring(0, 100) : 'unknown'}`);
   
   try {
-    let content;
+    let content = "";
     
-    // Get the ICS content
+    // Fetch content from URL
     if (source.startsWith("http://") || source.startsWith("https://")) {
-      console.log(`[ICS] Fetching from URL: ${source}`);
-      const res = await fetch(source, { 
-        headers: { 
-          "User-Agent": "Mozilla/5.0 (compatible; VKBot/1.0)" 
-        } 
-      });
-      if (!res.ok) {
-        console.error(`[ICS] HTTP error: ${res.status}`);
-        return { success: false, error: `HTTP ${res.status}` };
+      console.log(`[ICS] Fetching URL...`);
+      
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+      
+      try {
+        const res = await fetch(source, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/calendar,text/plain,*/*"
+          }
+        });
+        clearTimeout(timeout);
+        
+        if (!res.ok) {
+          console.error(`[ICS] HTTP ${res.status}: ${res.statusText}`);
+          return { success: false, error: `HTTP error ${res.status}. Please check the URL and try again.` };
+        }
+        
+        const contentType = res.headers.get("content-type") || "";
+        console.log(`[ICS] Content-Type: ${contentType}`);
+        
+        content = await res.text();
+        console.log(`[ICS] Downloaded ${content.length} bytes`);
+        
+      } catch (fetchError) {
+        clearTimeout(timeout);
+        if (fetchError.name === "AbortError") {
+          return { success: false, error: "Request timed out. The server took too long to respond." };
+        }
+        throw fetchError;
       }
-      content = await res.text();
-      console.log(`[ICS] Fetched ${content.length} bytes`);
-    } else if (source.startsWith("data:")) {
-      console.log(`[ICS] Parsing data URI`);
+    }
+    // Parse data URI
+    else if (source.startsWith("data:")) {
+      console.log(`[ICS] Parsing data URI...`);
       const match = source.match(/data:text\/calendar[^,]*,?(.+)/);
       if (match) {
         content = decodeURIComponent(match[1]);
+        console.log(`[ICS] Decoded ${content.length} bytes from data URI`);
       } else {
-        return { success: false, error: "Invalid data URI" };
+        return { success: false, error: "Invalid data URI format." };
       }
-    } else {
+    }
+    // Raw content
+    else {
       content = source;
+      console.log(`[ICS] Using raw content (${content.length} bytes)`);
     }
     
-    if (!content || !content.includes("BEGIN:VCALENDAR")) {
-      console.error(`[ICS] Invalid format. Content starts with: ${content?.substring(0, 100)}`);
-      return { success: false, error: "Invalid ICS format - no VCALENDAR found" };
+    // Validate content
+    if (!content || content.length < 10) {
+      return { success: false, error: "File is empty or too small." };
+    }
+    
+    if (!content.includes("BEGIN:VCALENDAR")) {
+      // Check if it's HTML (common error)
+      if (content.includes("<!DOCTYPE") || content.includes("<html")) {
+        return { success: false, error: "URL returned a webpage, not a calendar file. Make sure you use a direct .ics link." };
+      }
+      console.error(`[ICS] Content preview: ${content.substring(0, 200)}`);
+      return { success: false, error: "Not a valid ICS calendar file (missing VCALENDAR)." };
     }
     
     // Parse events
-    const events = [];
-    const lines = content.split(/\r?\n/);
-    let event = null;
-    let lineCount = 0;
-    
-    for (const line of lines) {
-      const trimmed = line.trim();
-      lineCount++;
-      
-      if (trimmed === "BEGIN:VEVENT") {
-        event = {};
-      } else if (trimmed === "END:VEVENT" && event) {
-        if (event.SUMMARY && event.DTSTART) {
-          events.push(event);
-        }
-        event = null;
-      } else if (event && trimmed.includes(":")) {
-        const idx = trimmed.indexOf(":");
-        const key = trimmed.substring(0, idx).split(";")[0];
-        const value = trimmed.substring(idx + 1);
-        event[key] = value;
-      }
-    }
-    
-    console.log(`[ICS] Parsed ${events.length} events from ${lineCount} lines`);
+    const events = parseICSContent(content);
+    console.log(`[ICS] Parsed ${events.length} events`);
     
     if (events.length === 0) {
-      return { success: false, error: "No valid events found in ICS file" };
+      return { success: false, error: "No calendar events found in the file." };
     }
     
-    // Get existing classes to check duplicates
+    // Get existing classes for duplicate check
     const existingClasses = await getClasses(userId);
-    console.log(`[ICS] Existing classes: ${existingClasses.length}`);
+    console.log(`[ICS] Existing classes in DB: ${existingClasses.length}`);
     
     let imported = 0;
     let duplicates = 0;
-    let errors = 0;
+    let skipped = 0;
     
-    for (const ev of events) {
+    for (let i = 0; i < events.length; i++) {
+      const ev = events[i];
+      
       try {
-        // Parse DTSTART
-        let match = ev.DTSTART?.match(/(\d{4})(\d{2})(\d{2})T?(\d{2})?(\d{2})?(\d{2})?/);
-        if (!match) {
-          console.log(`[ICS] Skipping event - no valid DTSTART: ${ev.SUMMARY}`);
-          errors++;
+        const startDate = parseICSTimestamp(ev.DTSTART);
+        if (!startDate || isNaN(startDate.getTime())) {
+          console.log(`[ICS] Skipping event ${i+1}: invalid DTSTART="${ev.DTSTART}"`);
+          skipped++;
           continue;
         }
-        
-        const year = parseInt(match[1]);
-        const month = parseInt(match[2]) - 1;
-        const day_of_month = parseInt(match[3]);
-        const hour = match[4] ? parseInt(match[4]) : 9;
-        const minute = match[5] ? parseInt(match[5]) : 0;
-        
-        if (isNaN(year) || isNaN(month) || isNaN(day_of_month)) {
-          console.log(`[ICS] Invalid date for: ${ev.SUMMARY}`);
-          errors++;
-          continue;
-        }
-        
-        const startDate = new Date(year, month, day_of_month, hour, minute);
         
         // Convert to day index (0=Mon, 6=Sun)
         let day = startDate.getDay();
@@ -677,69 +747,84 @@ async function importICS(userId, source) {
         
         const startTime = `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
         
-        // Parse DTEND or default to 1 hour
-        let endH = hour + 1;
-        let endM = minute;
-        const endMatch = ev.DTEND?.match(/(\d{4})(\d{2})(\d{2})T?(\d{2})?(\d{2})?/);
-        if (endMatch && endMatch[4]) {
-          endH = parseInt(endMatch[4]);
-          endM = parseInt(endMatch[5]) || 0;
+        // Parse end time
+        let endDate = null;
+        if (ev.DTEND) {
+          endDate = parseICSTimestamp(ev.DTEND);
         }
-        const endTime = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
         
-        // Get subject and location
-        const subject = (ev.SUMMARY || "Class").replace(/\\,/g, ",").replace(/\\\\/g, "\\").trim();
-        const location = (ev.LOCATION || "").replace(/\\,/g, ",").replace(/\\\\/g, "\\").trim();
+        // If no end time, default to 1 hour later
+        if (!endDate || isNaN(endDate.getTime())) {
+          endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+        }
         
-        console.log(`[ICS] Processing: ${subject} | Day ${day} | ${startTime}-${endTime} | ${location}`);
+        // If end time is before start time, add 1 hour
+        if (endDate <= startDate) {
+          endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+        }
         
-        // Check for duplicates
+        const endTime = `${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}`;
+        
+        // Get subject (clean up)
+        let subject = ev.SUMMARY || "Untitled Class";
+        subject = subject.replace(/\\,/g, ",").replace(/\\n/g, " ").replace(/\\\\/g, "\\").trim();
+        
+        if (!subject || subject.length === 0) {
+          subject = "Class";
+        }
+        
+        // Get location
+        let location = (ev.LOCATION || ev.DESCRIPTION || "").replace(/\\,/g, ",").replace(/\\n/g, " ").trim();
+        
+        console.log(`[ICS] Event ${i+1}: "${subject}" | Day ${day} | ${startTime}-${endTime} | ${location}`);
+        
+        // Check for duplicate
         const isDuplicate = existingClasses.some(c => 
           c.subject === subject && 
           c.day === day && 
-          c.start_time === startTime &&
-          c.end_time === endTime
+          c.start_time === startTime
         );
         
-        if (!isDuplicate) {
-          const success = await addClass(userId, subject, day, startTime, endTime, location);
-          if (success) {
-            imported++;
-            console.log(`[ICS] ✅ Imported: ${subject}`);
-          } else {
-            errors++;
-            console.error(`[ICS] ❌ Failed to add: ${subject}`);
-          }
-        } else {
+        if (isDuplicate) {
           duplicates++;
-          console.log(`[ICS] ⏭️ Skipped duplicate: ${subject}`);
+          console.log(`[ICS]   -> Duplicate, skipped`);
+          continue;
         }
+        
+        // Add to database
+        const success = await addClass(userId, subject, day, startTime, endTime, location);
+        
+        if (success) {
+          imported++;
+          console.log(`[ICS]   -> Imported successfully`);
+        } else {
+          skipped++;
+          console.log(`[ICS]   -> Database insert failed`);
+        }
+        
       } catch (eventError) {
-        console.error(`[ICS] Error processing event:`, eventError);
-        errors++;
+        console.error(`[ICS] Error processing event ${i+1}:`, eventError.message);
+        skipped++;
       }
     }
     
-    console.log(`[ICS] Import complete: ${imported} new, ${duplicates} skipped, ${errors} errors`);
+    console.log(`[ICS] Import complete: ${imported} new, ${duplicates} skipped (dupes), ${skipped} errors`);
     
-    // Clear cache to ensure fresh data on next query
+    // Clear cache to ensure fresh data
     clearUserCache(userId);
     
-    if (imported === 0 && duplicates === 0) {
-      return { success: false, error: "Could not import any classes. Check the ICS format." };
-    }
-    
-    return { 
-      success: true, 
-      count: imported, 
-      total: events.length, 
-      duplicates,
-      errors 
+    return {
+      success: imported > 0,
+      count: imported,
+      total: events.length,
+      duplicates: duplicates,
+      errors: skipped
     };
     
   } catch (e) {
-    console.error(`[ICS] Fatal error:`, e);
-    return { success: false, error: e.message };
+    console.error(`[ICS] Fatal error:`, e.message);
+    console.error(`[ICS] Stack:`, e.stack);
+    return { success: false, error: `${e.message}. Please try again or use a different calendar file.` };
   }
 }
 
@@ -769,8 +854,6 @@ async function processMessage(userId, text, lang) {
   const msg = text.trim();
   const lower = msg.toLowerCase();
   
-  console.log(`[Process] User ${userId}: ${msg.substring(0, 100)}`);
-  
   // ===== SET NAME =====
   let nameMatch = msg.match(/^(?:my name is |i'm |i am |call me )([a-zA-Z]{2,20})/i);
   if (!nameMatch) nameMatch = msg.match(/^(?:меня зовут |я )([а-яёА-ЯЁ]{2,20})/i);
@@ -791,11 +874,8 @@ async function processMessage(userId, text, lang) {
   
   // ===== SCHEDULE =====
   if (lower === "schedule" || lower === "расписание" || lower === "课程表" || 
-      lower === "classes" || lower === "пары" || lower === "课程" || msg.includes("📅")) {
-    
-    console.log(`[Process] Fetching schedule for user ${userId}`);
+      lower === "classes" || msg.includes("📅")) {
     const classes = await getClasses(userId);
-    console.log(`[Process] Found ${classes.length} classes`);
     
     if (classes.length === 0) {
       await sendVkMessage(userId, t(lang, "schedule_empty"), getKeyboard(lang));
@@ -816,7 +896,7 @@ async function processMessage(userId, text, lang) {
       });
     }
     
-    response += `\n📊 Total: ${classes.length} classes`;
+    response += `📊 Total: ${classes.length} classes`;
     
     await sendVkMessage(userId, response, getKeyboard(lang));
     return;
@@ -868,7 +948,7 @@ async function processMessage(userId, text, lang) {
   }
   
   // ===== NEXT CLASS =====
-  if (lower === "next" || lower === "следующая" || lower === "下一节" || lower === "下一个") {
+  if (lower === "next" || lower === "следующая" || lower === "下一节") {
     const next = await getNextClass(userId);
     
     if (!next) {
@@ -886,7 +966,7 @@ async function processMessage(userId, text, lang) {
     const header = lang === "ru" ? "⏰ *Следующая пара*" : lang === "zh" ? "⏰ *下一节课*" : "⏰ *Next Class*";
     let response = `${header}\n\n`;
     response += `📖 ${next.subject}\n`;
-    response += `📅 ${days[next.day]} (Day ${next.day})\n`;
+    response += `📅 ${days[next.day]}\n`;
     response += `🕐 ${next.start_time} - ${next.end_time}\n`;
     response += `⏱️ ${lang === "ru" ? "Через" : lang === "zh" ? "还有" : "In"} ${mins} ${lang === "ru" ? "мин" : lang === "zh" ? "分钟" : "min"}\n`;
     if (next.location) response += `📍 ${next.location}\n`;
@@ -916,9 +996,11 @@ async function processMessage(userId, text, lang) {
         await sendVkMessage(userId, t(lang, "class_added", {
           subject, day: days[day], start: startTime, end: endTime, location: location || "—"
         }), getKeyboard(lang));
+      } else {
+        await sendVkMessage(userId, "❌ Error adding class. Please try again.", getKeyboard(lang));
       }
     } else {
-      await sendVkMessage(userId, "❌ Format: /add subject day start end [location]", getKeyboard(lang));
+      await sendVkMessage(userId, "❌ Format: /add subject day start end [location]\nExample: /add Math 1 10:30 12:05 Room_101", getKeyboard(lang));
     }
     return;
   }
@@ -971,7 +1053,7 @@ async function processMessage(userId, text, lang) {
       await addTask(userId, title, dueDate, priority);
       await sendVkMessage(userId, t(lang, "task_added", { title, due_date: dueDate, priority }), getKeyboard(lang));
     } else {
-      await sendVkMessage(userId, '❌ Format: /task "Title" YYYY-MM-DD [high|medium|low]', getKeyboard(lang));
+      await sendVkMessage(userId, '❌ Format: /task "Title" YYYY-MM-DD [high|medium|low]\nExample: /task "Final Project" 2025-12-20 high', getKeyboard(lang));
     }
     return;
   }
@@ -1010,7 +1092,7 @@ async function processMessage(userId, text, lang) {
         await sendVkMessage(userId, "❌ Duration: 5-180 minutes", getKeyboard(lang));
       }
     } else {
-      await sendVkMessage(userId, "❌ Format: /study subject minutes", getKeyboard(lang));
+      await sendVkMessage(userId, "❌ Format: /study subject minutes\nExample: /study Math 30", getKeyboard(lang));
     }
     return;
   }
@@ -1040,51 +1122,50 @@ async function processMessage(userId, text, lang) {
     return;
   }
   
-  // ===== ICS IMPORT =====
+  // ===== ICS IMPORT VIA LINK =====
   if (lower.startsWith("/ics")) {
     const url = msg.split(/\s+/)[1];
-    if (url) {
-      await sendVkMessage(userId, t(lang, "import_start"), getKeyboard(lang));
+    
+    if (!url) {
+      await sendVkMessage(userId, "❌ Usage: /ics <url>\nExample: /ics https://example.com/calendar.ics\n\nOr attach a .ics file directly.", getKeyboard(lang));
+      return;
+    }
+    
+    // Validate URL
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      await sendVkMessage(userId, "❌ Please provide a valid URL starting with http:// or https://", getKeyboard(lang));
+      return;
+    }
+    
+    await sendVkMessage(userId, t(lang, "import_start"), getKeyboard(lang));
+    
+    const result = await importICS(userId, url);
+    
+    if (result.success) {
+      await sendVkMessage(userId, t(lang, "import_done", {
+        count: result.count,
+        total: result.total,
+        duplicates: result.duplicates
+      }), getKeyboard(lang));
       
-      const result = await importICS(userId, url);
-      
-      if (result.success && result.count > 0) {
-        await sendVkMessage(userId, t(lang, "import_done", { 
-          count: result.count, 
-          total: result.total, 
-          duplicates: result.duplicates 
-        }), getKeyboard(lang));
-        
-        // Auto-show the schedule after successful import
-        setTimeout(async () => {
-          const classes = await getClasses(userId);
-          if (classes.length > 0) {
-            const days = T[lang].weekdays;
-            let schedule = t(lang, "schedule_header");
-            for (const c of classes.slice(0, 10)) {
-              schedule += t(lang, "schedule_item", {
-                id: c.id,
-                day: days[c.day] || `Day ${c.day}`,
-                start: c.start_time,
-                end: c.end_time,
-                subject: c.subject,
-                location: c.location || "—"
-              });
-            }
-            if (classes.length > 10) {
-              schedule += `\n... and ${classes.length - 10} more classes. Type 'Schedule' to see all.`;
-            }
-            await sendVkMessage(userId, schedule, getKeyboard(lang));
+      // Auto-show schedule after import
+      setTimeout(async () => {
+        const classes = await getClasses(userId);
+        if (classes.length > 0) {
+          const days = T[lang].weekdays;
+          let schedule = "📅 *Your Updated Schedule*\n\n";
+          for (const c of classes.slice(0, 20)) {
+            schedule += `🆔 ${c.id} | ${days[c.day]} | ${c.start_time}-${c.end_time}\n   📖 ${c.subject}\n\n`;
           }
-        }, 1000);
-        
-      } else if (result.success && result.count === 0) {
-        await sendVkMessage(userId, `⚠️ All ${result.total} events were duplicates. Your schedule is already up to date!`, getKeyboard(lang));
-      } else {
-        await sendVkMessage(userId, t(lang, "import_fail", { error: result.error }), getKeyboard(lang));
-      }
+          if (classes.length > 20) {
+            schedule += `... and ${classes.length - 20} more. Type 'Schedule' for full view.`;
+          }
+          await sendVkMessage(userId, schedule, getKeyboard(lang));
+        }
+      }, 1500);
+      
     } else {
-      await sendVkMessage(userId, "❌ Usage: /ics <url>\nExample: /ics https://example.com/calendar.ics", getKeyboard(lang));
+      await sendVkMessage(userId, t(lang, "import_fail", { error: result.error }), getKeyboard(lang));
     }
     return;
   }
@@ -1124,6 +1205,7 @@ export async function handler(event) {
   try {
     const body = JSON.parse(event.body);
     
+    // VK confirmation
     if (body.type === "confirmation") {
       return {
         statusCode: 200,
@@ -1131,6 +1213,7 @@ export async function handler(event) {
       };
     }
     
+    // New message
     if (body.type === "message_new") {
       const msg = body.object?.message;
       if (!msg) {
@@ -1143,6 +1226,7 @@ export async function handler(event) {
       
       console.log(`[${userId}] ${text.substring(0, 100)}`);
       
+      // Detect language
       const detectedLang = detectLanguage(text);
       let user = await getUser(userId);
       
@@ -1154,52 +1238,55 @@ export async function handler(event) {
       const lang = user?.language || detectedLang;
       const userName = user?.name;
       
-      // Check for ICS file attachment
+      // ===== ICS FILE ATTACHMENT =====
       const icsFile = attachments.find(a => 
-        a.type === "doc" && a.doc?.title?.toLowerCase().includes(".ics")
+        a.type === "doc" && (
+          a.doc?.title?.toLowerCase().includes(".ics") ||
+          a.doc?.ext === "ics"
+        )
       );
       
       if (icsFile) {
-        console.log(`[${userId}] ICS file attached: ${icsFile.doc.title}`);
+        console.log(`[${userId}] ICS file: ${icsFile.doc.title} (${icsFile.doc.size} bytes)`);
+        
         await sendVkMessage(userId, t(lang, "import_start"), getKeyboard(lang));
         
         try {
           const res = await fetch(icsFile.doc.url);
+          if (!res.ok) {
+            throw new Error(`Failed to download file (HTTP ${res.status})`);
+          }
+          
           const content = await res.text();
-          console.log(`[${userId}] ICS file content length: ${content.length}`);
+          console.log(`[${userId}] File content: ${content.length} bytes`);
           
           const result = await importICS(userId, `data:text/calendar,${encodeURIComponent(content)}`);
           
-          if (result.success && result.count > 0) {
-            await sendVkMessage(userId, t(lang, "import_done", { 
-              count: result.count, 
-              total: result.total, 
-              duplicates: result.duplicates 
+          if (result.success) {
+            await sendVkMessage(userId, t(lang, "import_done", {
+              count: result.count,
+              total: result.total,
+              duplicates: result.duplicates
             }), getKeyboard(lang));
             
-            // Auto-show imported classes
+            // Show schedule
             setTimeout(async () => {
               const classes = await getClasses(userId);
               if (classes.length > 0) {
-                let schedule = `📅 *Imported Classes (${classes.length} total)*\n\n`;
+                let schedule = "📅 *Imported Classes*\n\n";
                 const days = T[lang].weekdays;
-                for (const c of classes.slice(0, 15)) {
-                  schedule += `🆔 ${c.id} | ${days[c.day] || `Day ${c.day}`} | ${c.start_time}-${c.end_time}\n   📖 ${c.subject}\n\n`;
-                }
-                if (classes.length > 15) {
-                  schedule += `... and ${classes.length - 15} more. Type 'Schedule' to see all.`;
+                for (const c of classes.slice(0, 20)) {
+                  schedule += `🆔 ${c.id} | ${days[c.day]} | ${c.start_time}-${c.end_time}\n   📖 ${c.subject}\n\n`;
                 }
                 await sendVkMessage(userId, schedule, getKeyboard(lang));
               }
             }, 1000);
             
-          } else if (result.count === 0 && result.duplicates > 0) {
-            await sendVkMessage(userId, `⚠️ All ${result.total} events were already in your schedule!`, getKeyboard(lang));
           } else {
-            await sendVkMessage(userId, t(lang, "import_fail", { error: result.error || "Unknown error" }), getKeyboard(lang));
+            await sendVkMessage(userId, t(lang, "import_fail", { error: result.error }), getKeyboard(lang));
           }
         } catch (e) {
-          console.error("ICS file error:", e);
+          console.error("File import error:", e);
           await sendVkMessage(userId, t(lang, "import_fail", { error: e.message }), getKeyboard(lang));
         }
         return { statusCode: 200, body: JSON.stringify({ ok: true }) };
@@ -1217,6 +1304,7 @@ export async function handler(event) {
         return { statusCode: 200, body: JSON.stringify({ ok: true }) };
       }
       
+      // Process message
       await processMessage(userId, text, lang);
       
       return { statusCode: 200, body: JSON.stringify({ ok: true }) };
@@ -1231,15 +1319,18 @@ export async function handler(event) {
 }
 
 function detectName(text) {
+  // English
   let match = text.match(/(?:my name is |i'm |i am |call me )([a-zA-Z]{2,20})/i);
   if (match) return match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
   
+  // Russian
   match = text.match(/(?:меня зовут |я )([а-яёА-ЯЁ]{2,20})/i);
   if (match) {
     const name = match[1].toLowerCase();
     return name.charAt(0).toUpperCase() + name.slice(1);
   }
   
+  // Chinese
   match = text.match(/(?:我叫|我是)([\u4e00-\u9fff]{1,4})/);
   if (match) return match[1];
   
