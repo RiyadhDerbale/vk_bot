@@ -111,10 +111,7 @@ CREATE POLICY "Allow service role" ON study_logs
 
 
 
-
-
-
-
+-- Create tables
 CREATE TABLE IF NOT EXISTS users (
   vk_id BIGINT PRIMARY KEY,
   name TEXT DEFAULT 'Student',
@@ -143,28 +140,3 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 
 
-
-
-// netlify/functions/supabase-client.mjs - Add connection pooling
-import { createClient } from '@supabase/supabase-js';
-
-let supabaseInstance = null;
-
-export function getSupabaseClient() {
-  if (!supabaseInstance) {
-    supabaseInstance = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_KEY,
-      {
-        auth: { persistSession: false },
-        db: { schema: 'public' },
-        global: {
-          headers: { 'x-application-name': 'vk-bot' },
-        },
-        // Keep connection alive
-        realtime: { params: { eventsPerSecond: 10 } }
-      }
-    );
-  }
-  return supabaseInstance;
-}

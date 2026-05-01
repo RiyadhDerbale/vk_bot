@@ -3146,51 +3146,10 @@ export async function checkReminders() {
 // VK Smart Assistant Bot - COMPLETE WORKING VERSION
 // All features: Schedule, Tasks, ICS Import, File Upload, Statistics
 
+// VK Smart Assistant Bot - COMPLETE WORKING VERSION
+// Save as: netlify/functions/vk-webhook.js
+
 import { createClient } from "@supabase/supabase-js";
-import fetch from "node-fetch";
-
-// netlify/functions/vk-webhook.mjs - Add better error handling
-import { supabase } from './supabase-client.mjs';
-
-
-export const handler = async (event, context) => {
-  // Add connection retry logic
-  let retries = 3;
-  let lastError;
-  
-  while (retries > 0) {
-    try {
-      const result = await handleRequest(event);
-      return result;
-    } catch (error) {
-      lastError = error;
-      retries--;
-      if (retries > 0) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        continue;
-      }
-    }
-  }
-  
-  return {
-    statusCode: 500,
-    body: JSON.stringify({ error: lastError.message })
-  };
-};
-
-async function handleRequest(event) {
-  // Add connection keep-alive
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
-  
-  try {
-    // Your existing logic
-    const body = JSON.parse(event.body);
-    // ... process message
-  } finally {
-    clearTimeout(timeout);
-  }
-}
 
 // ==================== CONFIGURATION ====================
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -3200,36 +3159,22 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const VK_TOKEN = process.env.VK_TOKEN;
 const VK_API_VERSION = "5.199";
 
-// ==================== DATABASE SETUP ====================
-// Run this SQL in Supabase first:
-/*
-CREATE TABLE IF NOT EXISTS users (
-  vk_id BIGINT PRIMARY KEY,
-  name TEXT DEFAULT 'Student',
-  created_at TIMESTAMP DEFAULT NOW()
-);
+// Simple in-memory cache
+const cache = new Map();
 
-CREATE TABLE IF NOT EXISTS schedule (
-  id SERIAL PRIMARY KEY,
-  user_id BIGINT REFERENCES users(vk_id),
-  subject TEXT,
-  day INTEGER,
-  start_time TEXT,
-  end_time TEXT,
-  location TEXT
-);
+function getCached(key) {
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.time < 300000) return cached.data;
+  return null;
+}
 
-CREATE TABLE IF NOT EXISTS tasks (
-  id SERIAL PRIMARY KEY,
-  user_id BIGINT REFERENCES users(vk_id),
-  title TEXT,
-  description TEXT,
-  due_date DATE,
-  priority TEXT DEFAULT 'normal',
-  completed BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-*/
+function setCached(key, data) {
+  cache.set(key, { data, time: Date.now() });
+}
+
+function invalidateCache(userId, type) {
+  cache.delete(`${type}_${userId}`);
+}
 
 // ==================== DATABASE FUNCTIONS ====================
 async function getUser(userId) {
@@ -3239,10 +3184,7 @@ async function getUser(userId) {
     .eq("vk_id", userId)
     .single();
   
-  if (error && error.code !== "PGRST116") {
-    console.error("Get user error:", error);
-    return null;
-  }
+  if (error && error.code !== "PGRST116") return null;
   return data;
 }
 
@@ -3250,8 +3192,6 @@ async function createUser(userId, name) {
   const { error } = await supabase
     .from("users")
     .insert({ vk_id: userId, name: name || "Student" });
-  
-  if (error) console.error("Create user error:", error);
   return !error;
 }
 
@@ -3260,42 +3200,40 @@ async function updateUserName(userId, name) {
     .from("users")
     .update({ name })
     .eq("vk_id", userId);
-  
   return !error;
 }
 
 async function getUserName(userId) {
+  const cached = getCached(`name_${userId}`);
+  if (cached) return cached;
+  
   const { data, error } = await supabase
     .from("users")
     .select("name")
     .eq("vk_id", userId)
     .single();
   
-  if (error) return "Student";
-  return data?.name || "Student";
+  const name = (!error && data?.name) ? data.name : "Student";
+  setCached(`name_${userId}`, name);
+  return name;
 }
 
-// Schedule functions
 async function addClass(userId, subject, day, startTime, endTime, location = "") {
-  const { error } = await supabase
-    .from("schedule")
-    .insert({
-      user_id: userId,
-      subject: subject,
-      day: day,
-      start_time: startTime,
-      end_time: endTime,
-      location: location
-    });
+  const { error } = await supabase.from("schedule").insert({
+    user_id: userId, subject, day, start_time: startTime, end_time: endTime, location
+  });
   
-  if (error) {
-    console.error("Add class error:", error);
-    return false;
+  if (!error) {
+    invalidateCache(userId, "schedule");
+    return true;
   }
-  return true;
+  return false;
 }
 
 async function getClasses(userId) {
+  const cached = getCached(`schedule_${userId}`);
+  if (cached) return cached;
+  
   const { data, error } = await supabase
     .from("schedule")
     .select("*")
@@ -3303,8 +3241,9 @@ async function getClasses(userId) {
     .order("day", { ascending: true })
     .order("start_time", { ascending: true });
   
-  if (error) return [];
-  return data || [];
+  const result = error ? [] : data || [];
+  setCached(`schedule_${userId}`, result);
+  return result;
 }
 
 async function deleteClass(classId, userId) {
@@ -3314,52 +3253,45 @@ async function deleteClass(classId, userId) {
     .eq("id", classId)
     .eq("user_id", userId);
   
-  return !error;
+  if (!error) {
+    invalidateCache(userId, "schedule");
+    return true;
+  }
+  return false;
 }
 
 async function clearAllClasses(userId) {
-  const { error } = await supabase
-    .from("schedule")
-    .delete()
-    .eq("user_id", userId);
-  
-  return !error;
+  const { error } = await supabase.from("schedule").delete().eq("user_id", userId);
+  if (!error) {
+    invalidateCache(userId, "schedule");
+    return true;
+  }
+  return false;
 }
 
-// Task functions
-async function addTask(userId, title, description, dueDate, priority = "normal") {
-  const { error } = await supabase
-    .from("tasks")
-    .insert({
-      user_id: userId,
-      title: title,
-      description: description || "",
-      due_date: dueDate,
-      priority: priority,
-      completed: false
-    });
+async function addTask(userId, title, dueDate, priority = "normal") {
+  const { error } = await supabase.from("tasks").insert({
+    user_id: userId, title, due_date: dueDate, priority, completed: false
+  });
   
-  if (error) {
-    console.error("Add task error:", error);
-    return false;
+  if (!error) {
+    invalidateCache(userId, "tasks");
+    return true;
   }
-  return true;
+  return false;
 }
 
-async function getTasks(userId, showCompleted = false) {
-  let query = supabase
-    .from("tasks")
-    .select("*")
-    .eq("user_id", userId);
+async function getTasks(userId, onlyPending = true) {
+  const cached = getCached(`tasks_${userId}_${onlyPending}`);
+  if (cached) return cached;
   
-  if (!showCompleted) {
-    query = query.eq("completed", false);
-  }
+  let query = supabase.from("tasks").select("*").eq("user_id", userId);
+  if (onlyPending) query = query.eq("completed", false);
   
   const { data, error } = await query.order("due_date", { ascending: true });
-  
-  if (error) return [];
-  return data || [];
+  const result = error ? [] : data || [];
+  setCached(`tasks_${userId}_${onlyPending}`, result);
+  return result;
 }
 
 async function completeTask(taskId, userId) {
@@ -3369,7 +3301,11 @@ async function completeTask(taskId, userId) {
     .eq("id", taskId)
     .eq("user_id", userId);
   
-  return !error;
+  if (!error) {
+    invalidateCache(userId, "tasks");
+    return true;
+  }
+  return false;
 }
 
 async function deleteTask(taskId, userId) {
@@ -3378,23 +3314,7 @@ async function deleteTask(taskId, userId) {
     .delete()
     .eq("id", taskId)
     .eq("user_id", userId);
-  
   return !error;
-}
-
-// Statistics
-async function getStatistics(userId) {
-  const classes = await getClasses(userId);
-  const tasks = await getTasks(userId, false);
-  const completedTasks = await getTasks(userId, true);
-  const completedCount = completedTasks.filter(t => t.completed === true).length;
-  
-  return {
-    totalClasses: classes.length,
-    pendingTasks: tasks.filter(t => !t.completed).length,
-    completedTasks: completedCount,
-    totalTasks: completedTasks.length
-  };
 }
 
 // ==================== ICS IMPORT ====================
@@ -3402,28 +3322,26 @@ async function importICSFromUrl(userId, url) {
   console.log(`Importing ICS from: ${url}`);
   
   try {
-    // Download the file
     const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
     });
     
-    if (!response.ok) {
-      return { success: false, error: `HTTP ${response.status}` };
-    }
+    if (!response.ok) return { success: false, error: `HTTP ${response.status}` };
     
     let content = await response.text();
-    console.log(`Downloaded ${content.length} bytes`);
     
-    // If it's HTML, try to find ICS link
+    // Handle HTML responses (find actual ICS link)
     if (content.includes('<!DOCTYPE html>') || content.includes('<html')) {
       const linkMatch = content.match(/https?:\/\/[^\s"']+\.ics/i);
       if (linkMatch) {
         console.log(`Found ICS link in HTML: ${linkMatch[0]}`);
         return importICSFromUrl(userId, linkMatch[0]);
       }
-      return { success: false, error: "URL returned HTML, not an ICS file" };
+      return { success: false, error: "URL returned HTML, not ICS file" };
+    }
+    
+    if (!content.includes('BEGIN:VCALENDAR')) {
+      return { success: false, error: "Not a valid ICS file" };
     }
     
     // Parse ICS manually
@@ -3439,9 +3357,7 @@ async function importICSFromUrl(userId, url) {
         currentEvent = {};
         inEvent = true;
       } else if (line === 'END:VEVENT' && currentEvent) {
-        if (currentEvent.SUMMARY && currentEvent.DTSTART) {
-          events.push(currentEvent);
-        }
+        if (currentEvent.SUMMARY && currentEvent.DTSTART) events.push(currentEvent);
         currentEvent = null;
         inEvent = false;
       } else if (inEvent && currentEvent) {
@@ -3449,20 +3365,15 @@ async function importICSFromUrl(userId, url) {
         if (colonIndex > 0) {
           let key = line.substring(0, colonIndex);
           let value = line.substring(colonIndex + 1);
-          const semicolonIndex = key.indexOf(';');
-          if (semicolonIndex > 0) {
-            key = key.substring(0, semicolonIndex);
-          }
+          const semiIndex = key.indexOf(';');
+          if (semiIndex > 0) key = key.substring(0, semiIndex);
           currentEvent[key] = value;
         }
       }
     }
     
     console.log(`Found ${events.length} events`);
-    
-    if (events.length === 0) {
-      return { success: false, error: "No events found in ICS file" };
-    }
+    if (events.length === 0) return { success: false, error: "No events found" };
     
     // Import events
     let imported = 0;
@@ -3470,16 +3381,12 @@ async function importICSFromUrl(userId, url) {
     
     for (const event of events) {
       try {
-        // Parse date
         let startValue = event.DTSTART;
         let match = startValue.match(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/);
-        
-        if (!match) {
-          match = startValue.match(/(\d{4})(\d{2})(\d{2})/);
-        }
+        if (!match) match = startValue.match(/(\d{4})(\d{2})(\d{2})/);
         
         if (match) {
-          const [, year, month, day, hour = 9, minute = 0, second = 0] = match;
+          const [, year, month, day, hour = 9, minute = 0] = match;
           const startDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
           
           let dayOfWeek = startDate.getDay();
@@ -3489,11 +3396,8 @@ async function importICSFromUrl(userId, url) {
           const startTimeStr = `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
           const endTimeStr = `${String(startDate.getHours() + 1).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
           
-          let subject = event.SUMMARY || 'Class';
-          subject = subject.replace(/<[^>]*>/g, '').trim();
-          
-          let location = event.LOCATION || '';
-          location = location.replace(/<[^>]*>/g, '').trim();
+          let subject = (event.SUMMARY || 'Class').replace(/<[^>]*>/g, '').trim();
+          let location = (event.LOCATION || '').replace(/<[^>]*>/g, '').trim();
           
           const added = await addClass(userId, subject, dayOfWeek, startTimeStr, endTimeStr, location);
           if (added) imported++;
@@ -3520,10 +3424,7 @@ async function sendMessage(userId, text, keyboard = null) {
     params.append("user_id", userId);
     params.append("message", text.slice(0, 4096));
     params.append("random_id", Math.floor(Math.random() * 1000000));
-    
-    if (keyboard) {
-      params.append("keyboard", keyboard);
-    }
+    if (keyboard) params.append("keyboard", keyboard);
     
     const response = await fetch("https://api.vk.com/method/messages.send", {
       method: "POST",
@@ -3531,9 +3432,7 @@ async function sendMessage(userId, text, keyboard = null) {
     });
     
     const data = await response.json();
-    if (data.error) {
-      console.error("VK API Error:", data.error);
-    }
+    if (data.error) console.error("VK API Error:", data.error);
     return data;
   } catch (error) {
     console.error("Send message error:", error);
@@ -3553,24 +3452,12 @@ function getMainKeyboard() {
   });
 }
 
-function getTaskKeyboard(taskId) {
-  return JSON.stringify({
-    inline: true,
-    buttons: [[{
-      action: { type: "callback", label: "✅ Complete", payload: JSON.stringify({ cmd: "complete_task", tid: taskId }) },
-      color: "positive"
-    }]]
-  });
-}
-
 // ==================== MESSAGE HANDLER ====================
-async function handleMessage(userId, text, attachments) {
+async function handleMessage(userId, text) {
   const name = await getUserName(userId);
   const lowerText = text.toLowerCase().trim();
   
-  // ========== BASIC COMMANDS ==========
-  
-  // Help
+  // HELP
   if (text === "❓ Help" || lowerText === "/help" || lowerText === "help") {
     const helpText = `🤖 **Smart Assistant Bot - Help**
 
@@ -3578,16 +3465,11 @@ async function handleMessage(userId, text, attachments) {
 • "Schedule" - View all classes
 • /add <subject> <day> <start> <end> - Add a class
 • /delete <class_id> - Delete a class
-• /clear_classes - Delete all classes
 
 📝 **Task Commands:**
 • "Tasks" - View pending tasks
-• /task <title> <due_date> <priority> - Add a task
+• /task "Title" YYYY-MM-DD - Add a task
 • /complete <task_id> - Mark task as done
-• /delete_task <task_id> - Delete a task
-
-📊 **Statistics:**
-• "Stats" - View your progress
 
 📥 **Import Schedule:**
 • /ics <url> - Import from ICS link
@@ -3595,20 +3477,18 @@ async function handleMessage(userId, text, attachments) {
 
 📋 **Examples:**
 • /add Math 1 10:30 12:05 Room 101
-• /task "Homework" 2025-12-20 high
+• /task "Homework" 2025-12-20
 • /complete 1
 
 Days: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
 
-Need more help? Just ask! 😊`;
+Type a command to get started! 😊`;
     await sendMessage(userId, helpText, getMainKeyboard());
     return;
   }
   
-  // ========== SCHEDULE COMMANDS ==========
-  
-  // View schedule
-  if (text === "📅 Schedule" || lowerText === "schedule" || lowerText === "/schedule") {
+  // SCHEDULE - View all classes
+  if (text === "📅 Schedule" || lowerText === "schedule") {
     const classes = await getClasses(userId);
     
     if (classes.length === 0) {
@@ -3616,7 +3496,7 @@ Need more help? Just ask! 😊`;
       return;
     }
     
-    const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     let message = "📅 **Your Schedule**\n\n";
     
     for (const cls of classes) {
@@ -3626,14 +3506,12 @@ Need more help? Just ask! 😊`;
       message += `   💡 Delete: /delete ${cls.id}\n\n`;
     }
     
-    message += `📊 Total: ${classes.length} classes\n`;
-    message += `💡 To delete: /delete <class_id>`;
-    
+    message += `📊 Total: ${classes.length} classes`;
     await sendMessage(userId, message, getMainKeyboard());
     return;
   }
   
-  // Add class
+  // ADD CLASS
   if (lowerText.startsWith("/add")) {
     const parts = text.split(" ");
     if (parts.length >= 5) {
@@ -3649,7 +3527,6 @@ Need more help? Just ask! 😊`;
       }
       
       const success = await addClass(userId, subject, day, startTime, endTime, location);
-      
       if (success) {
         const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
         await sendMessage(userId, `✅ **Class added!**\n\n📖 ${subject}\n📅 ${days[day]}\n⏰ ${startTime}-${endTime}\n📍 ${location || "No location"}`, getMainKeyboard());
@@ -3662,7 +3539,7 @@ Need more help? Just ask! 😊`;
     return;
   }
   
-  // Delete class
+  // DELETE CLASS
   if (lowerText.startsWith("/delete")) {
     const parts = text.split(" ");
     if (parts.length >= 2) {
@@ -3672,79 +3549,61 @@ Need more help? Just ask! 😊`;
         if (success) {
           await sendMessage(userId, `✅ **Class ${classId} deleted!**`, getMainKeyboard());
         } else {
-          await sendMessage(userId, "❌ Class not found or could not be deleted.", getMainKeyboard());
+          await sendMessage(userId, "❌ Class not found.", getMainKeyboard());
         }
       } else {
-        await sendMessage(userId, "❌ Please provide a valid class ID.\n\nUse /schedule to see IDs.", getMainKeyboard());
+        await sendMessage(userId, "❌ Please provide a valid class ID.\n\nUse Schedule to see IDs.", getMainKeyboard());
       }
     } else {
-      await sendMessage(userId, "📝 **Delete Class:**\n`/delete <class_id>`\n\nUse /schedule to see class IDs.", getMainKeyboard());
+      await sendMessage(userId, "📝 **Delete Class:**\n`/delete <class_id>`\n\nUse Schedule to see class IDs.", getMainKeyboard());
     }
     return;
   }
   
-  // Clear all classes
-  if (lowerText === "/clear_classes") {
-    const success = await clearAllClasses(userId);
-    if (success) {
-      await sendMessage(userId, "🗑️ **All classes have been cleared!**", getMainKeyboard());
-    } else {
-      await sendMessage(userId, "❌ Failed to clear classes.", getMainKeyboard());
-    }
-    return;
-  }
-  
-  // ========== TASK COMMANDS ==========
-  
-  // View tasks
-  if (text === "📝 Tasks" || lowerText === "tasks" || lowerText === "/tasks") {
-    const tasks = await getTasks(userId, false);
+  // TASKS - View all tasks
+  if (text === "📝 Tasks" || lowerText === "tasks") {
+    const tasks = await getTasks(userId, true);
     
     if (tasks.length === 0) {
-      await sendMessage(userId, "✅ **No pending tasks!**\n\nAdd a task with:\n`/task \"Study Math\" 2025-12-20 high`", getMainKeyboard());
+      await sendMessage(userId, "✅ **No pending tasks!**\n\nAdd a task with:\n`/task \"Study Math\" 2025-12-20`", getMainKeyboard());
       return;
     }
     
     let message = "📝 **Your Tasks**\n\n";
-    
     for (const task of tasks) {
       const priorityIcon = task.priority === "high" ? "🔴" : task.priority === "medium" ? "🟡" : "🟢";
       message += `🆔 ${task.id} ${priorityIcon} **${task.title}**\n`;
       message += `   📅 Due: ${task.due_date}\n`;
-      if (task.description) message += `   📝 ${task.description}\n`;
       message += `   💡 Complete: /complete ${task.id}\n`;
       message += `   🗑️ Delete: /delete_task ${task.id}\n\n`;
     }
     
-    message += `💡 To complete: /complete <task_id>\n💡 To delete: /delete_task <task_id>`;
-    
+    message += `💡 To complete: /complete <task_id>`;
     await sendMessage(userId, message, getMainKeyboard());
     return;
   }
   
-  // Add task
+  // ADD TASK
   if (lowerText.startsWith("/task")) {
-    const match = text.match(/\/task\s+"([^"]+)"\s+(\d{4}-\d{2}-\d{2})\s*(high|medium|normal)?/);
+    const match = text.match(/\/task\s+"([^"]+)"\s+(\d{4}-\d{2}-\d{2})/);
     
     if (match) {
       const title = match[1];
       const dueDate = match[2];
-      const priority = match[3] || "normal";
       
-      const success = await addTask(userId, title, "", dueDate, priority);
-      
+      const success = await addTask(userId, title, dueDate, "normal");
       if (success) {
-        await sendMessage(userId, `✅ **Task added!**\n\n📝 ${title}\n📅 Due: ${dueDate}\n🎯 Priority: ${priority}`, getMainKeyboard());
+        await sendMessage(userId, `✅ **Task added!**\n\n📝 ${title}\n📅 Due: ${dueDate}`, getMainKeyboard());
       } else {
         await sendMessage(userId, "❌ Failed to add task.", getMainKeyboard());
       }
     } else {
-      await sendMessage(userId, "📝 **Add Task Format:**\n`/task \"Title\" YYYY-MM-DD [priority]`\n\nExample: `/task \"Finish homework\" 2025-12-20 high`\n\nPriority: high, medium, normal (default)", getMainKeyboard());
+      await sendMessage(userId, "📝 **Add Task Format:**\n`/task \"Title\" YYYY-MM-DD`\n\nExample: `/task \"Finish homework\" 2025-12-20`", getMainKeyboard());
     }
     return;
   }
   
-  // Complete task
+  // COMPLETE TASK
   if (lowerText.startsWith("/complete")) {
     const parts = text.split(" ");
     if (parts.length >= 2) {
@@ -3757,15 +3616,15 @@ Need more help? Just ask! 😊`;
           await sendMessage(userId, "❌ Task not found or already completed.", getMainKeyboard());
         }
       } else {
-        await sendMessage(userId, "❌ Please provide a valid task ID.\n\nUse /tasks to see IDs.", getMainKeyboard());
+        await sendMessage(userId, "❌ Please provide a valid task ID.\n\nUse Tasks to see IDs.", getMainKeyboard());
       }
     } else {
-      await sendMessage(userId, "📝 **Complete Task:**\n`/complete <task_id>`\n\nUse /tasks to see task IDs.", getMainKeyboard());
+      await sendMessage(userId, "📝 **Complete Task:**\n`/complete <task_id>`\n\nUse Tasks to see task IDs.", getMainKeyboard());
     }
     return;
   }
   
-  // Delete task
+  // DELETE TASK
   if (lowerText.startsWith("/delete_task")) {
     const parts = text.split(" ");
     if (parts.length >= 2) {
@@ -3781,32 +3640,33 @@ Need more help? Just ask! 😊`;
         await sendMessage(userId, "❌ Please provide a valid task ID.", getMainKeyboard());
       }
     } else {
-      await sendMessage(userId, "📝 **Delete Task:**\n`/delete_task <task_id>`\n\nUse /tasks to see task IDs.", getMainKeyboard());
+      await sendMessage(userId, "📝 **Delete Task:**\n`/delete_task <task_id>`\n\nUse Tasks to see task IDs.", getMainKeyboard());
     }
     return;
   }
   
-  // ========== STATISTICS ==========
-  if (text === "📊 Stats" || lowerText === "stats" || lowerText === "/stats") {
-    const stats = await getStatistics(userId);
+  // STATISTICS
+  if (text === "📊 Stats" || lowerText === "stats") {
+    const classes = await getClasses(userId);
+    const tasks = await getTasks(userId, true);
+    const allTasks = await getTasks(userId, false);
+    const completedTasks = allTasks.filter(t => t.completed === true).length;
     
-    const completionRate = stats.totalTasks > 0 
-      ? Math.round((stats.completedTasks / stats.totalTasks) * 100) 
-      : 0;
+    const completionRate = allTasks.length > 0 ? Math.round((completedTasks / allTasks.length) * 100) : 0;
     
     let message = "📊 **Your Statistics**\n\n";
     message += `📚 **Schedule**\n`;
-    message += `   • Total classes: ${stats.totalClasses}\n\n`;
+    message += `   • Total classes: ${classes.length}\n\n`;
     message += `📝 **Tasks**\n`;
-    message += `   • Completed: ${stats.completedTasks}\n`;
-    message += `   • Pending: ${stats.pendingTasks}\n`;
-    message += `   • Total: ${stats.totalTasks}\n`;
+    message += `   • Completed: ${completedTasks}\n`;
+    message += `   • Pending: ${tasks.length}\n`;
+    message += `   • Total: ${allTasks.length}\n`;
     message += `   • Completion rate: ${completionRate}%\n\n`;
     
-    if (stats.pendingTasks > 0) {
-      message += `🎯 Focus on completing your ${stats.pendingTasks} pending task(s)!`;
-    } else if (stats.totalClasses > 0) {
-      message += `📅 Keep up with your ${stats.totalClasses} classes!`;
+    if (tasks.length > 0) {
+      message += `🎯 Focus on completing your ${tasks.length} pending task(s)!`;
+    } else if (classes.length > 0) {
+      message += `📅 Keep up with your ${classes.length} classes!`;
     } else {
       message += `💡 Add some classes or tasks to get started!`;
     }
@@ -3815,13 +3675,13 @@ Need more help? Just ask! 😊`;
     return;
   }
   
-  // ========== ICS IMPORT ==========
+  // ICS IMPORT
   if (lowerText.startsWith("/ics")) {
     const parts = text.split(" ");
     if (parts.length >= 2) {
       const icsUrl = parts[1];
       
-      await sendMessage(userId, "⏳ **Importing calendar...**\n\nThis may take up to 30 seconds.\nPlease wait...", getMainKeyboard());
+      await sendMessage(userId, "⏳ **Importing calendar...**\n\nPlease wait...", getMainKeyboard());
       
       const result = await importICSFromUrl(userId, icsUrl);
       
@@ -3837,8 +3697,11 @@ Need more help? Just ask! 😊`;
     return;
   }
   
-  // ========== DEFAULT RESPONSE ==========
-  await sendMessage(userId, `👋 Hey ${name}! I'm your academic assistant.\n\n📌 **Quick Commands:**\n• Schedule - View your timetable\n• Tasks - See your to-do list\n• Stats - Check your progress\n• Help - All commands\n\n📥 To import your timetable, send an ICS file or use /ics <url>`, getMainKeyboard());
+  // Handle ICS file attachment (from webhook)
+  // This will be called separately when a file is attached
+  
+  // DEFAULT RESPONSE
+  await sendMessage(userId, `👋 Hey ${name}! I'm your academic assistant.\n\n📌 **Quick Commands:**\n• Schedule - View your timetable\n• Tasks - See your to-do list\n• Stats - Check your progress\n• Help - All commands\n\n📥 To import your timetable: /ics <url> or attach an ICS file`, getMainKeyboard());
 }
 
 // ==================== WEBHOOK HANDLER ====================
@@ -3849,6 +3712,7 @@ export async function handler(event) {
     
     // VK Confirmation
     if (body.type === "confirmation") {
+      console.log("Sending confirmation");
       return {
         statusCode: 200,
         body: process.env.VK_CONFIRMATION_TOKEN || "confirmation_token"
@@ -3864,7 +3728,7 @@ export async function handler(event) {
       
       console.log(`[${userId}] Message: ${text.substring(0, 100)}`);
       
-      // Handle ICS file attachment
+      // Check for ICS file attachment
       let icsFile = null;
       for (const attachment of attachments) {
         if (attachment.type === "doc") {
@@ -3885,6 +3749,7 @@ export async function handler(event) {
       
       // Handle name on first message
       const nameMatch = text.match(/(?:my name is|call me|меня зовут|我叫)\s+([A-Za-zА-Яа-я\u4e00-\u9fff]+)/i);
+      
       if (!user.name && !nameMatch && !text.startsWith("/") && !text.includes("📅") && !text.includes("📝")) {
         await sendMessage(userId, "👋 **Hello! What's your name?**\n\nExample: 'My name is John'");
         return { statusCode: 200, body: JSON.stringify({ ok: true }) };
@@ -3902,19 +3767,87 @@ export async function handler(event) {
         console.log(`[${userId}] Processing ICS file: ${icsFile.title}`);
         await sendMessage(userId, "⏳ **Processing your ICS file...**", getMainKeyboard());
         
-        const result = await importICSFromUrl(userId, icsFile.url);
-        
-        if (result.success && result.count > 0) {
-          await sendMessage(userId, `✅ **Success!**\n\nImported **${result.count}** classes from your file!\n\nType "Schedule" to see them.`, getMainKeyboard());
-        } else {
-          await sendMessage(userId, "❌ **Could not import file**\n\nMake sure it's a valid .ics calendar file.\n\nYou can also add classes manually with /add", getMainKeyboard());
+        // Download and parse the file
+        try {
+          const response = await fetch(icsFile.url);
+          const content = await response.text();
+          
+          if (content.includes('BEGIN:VCALENDAR')) {
+            // Parse ICS content
+            const events = [];
+            const lines = content.split(/\r?\n/);
+            let currentEvent = null;
+            let inEvent = false;
+            
+            for (let i = 0; i < lines.length; i++) {
+              let line = lines[i].trim();
+              
+              if (line === 'BEGIN:VEVENT') {
+                currentEvent = {};
+                inEvent = true;
+              } else if (line === 'END:VEVENT' && currentEvent) {
+                if (currentEvent.SUMMARY && currentEvent.DTSTART) events.push(currentEvent);
+                currentEvent = null;
+                inEvent = false;
+              } else if (inEvent && currentEvent) {
+                const colonIndex = line.indexOf(':');
+                if (colonIndex > 0) {
+                  let key = line.substring(0, colonIndex);
+                  let value = line.substring(colonIndex + 1);
+                  const semiIndex = key.indexOf(';');
+                  if (semiIndex > 0) key = key.substring(0, semiIndex);
+                  currentEvent[key] = value;
+                }
+              }
+            }
+            
+            let imported = 0;
+            for (const event of events) {
+              try {
+                let startValue = event.DTSTART;
+                let match = startValue.match(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/);
+                if (!match) match = startValue.match(/(\d{4})(\d{2})(\d{2})/);
+                
+                if (match) {
+                  const [, year, month, day, hour = 9, minute = 0] = match;
+                  const startDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
+                  
+                  let dayOfWeek = startDate.getDay();
+                  if (dayOfWeek === 0) dayOfWeek = 6;
+                  else dayOfWeek = dayOfWeek - 1;
+                  
+                  const startTimeStr = `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
+                  const endTimeStr = `${String(startDate.getHours() + 1).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
+                  
+                  let subject = (event.SUMMARY || 'Class').replace(/<[^>]*>/g, '').trim();
+                  let location = (event.LOCATION || '').replace(/<[^>]*>/g, '').trim();
+                  
+                  const added = await addClass(userId, subject, dayOfWeek, startTimeStr, endTimeStr, location);
+                  if (added) imported++;
+                }
+              } catch (err) {
+                console.error("Error importing event:", err);
+              }
+            }
+            
+            if (imported > 0) {
+              await sendMessage(userId, `✅ **Success!**\n\nImported **${imported}** classes from your file!\n\nType "Schedule" to see them.`, getMainKeyboard());
+            } else {
+              await sendMessage(userId, "⚠️ **No valid events found** in the file.\n\nMake sure it's a calendar export with events.", getMainKeyboard());
+            }
+          } else {
+            await sendMessage(userId, "❌ **Invalid file**\n\nThis doesn't appear to be a valid ICS calendar file.", getMainKeyboard());
+          }
+        } catch (err) {
+          console.error(`[${userId}] File error:`, err);
+          await sendMessage(userId, "❌ **Error processing file**\n\nPlease try again or use manual entry with /add", getMainKeyboard());
         }
         
         return { statusCode: 200, body: JSON.stringify({ ok: true }) };
       }
       
       // Handle regular message
-      await handleMessage(userId, text, attachments);
+      await handleMessage(userId, text);
       
       return { statusCode: 200, body: JSON.stringify({ ok: true }) };
     }
@@ -3922,53 +3855,12 @@ export async function handler(event) {
     return { statusCode: 200, body: JSON.stringify({ ok: true }) };
     
   } catch (error) {
-    console.error("[Webhook] Error:", error);
+    console.error("Handler error:", error);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: error.message })
     };
   }
-}
-
-// For local testing
-if (process.env.NODE_ENV === "development") {
-  console.log("=".repeat(60));
-  console.log("🤖 VK Smart Assistant Bot - WORKING VERSION");
-  console.log("=".repeat(60));
-  console.log("✅ Features enabled:");
-  console.log("   • Schedule management (add/delete/view)");
-  console.log("   • Task management (add/complete/delete)");
-  console.log("   • Statistics tracking");
-  console.log("   • ICS import from URLs");
-  console.log("   • ICS file uploads");
-  console.log("=".repeat(60));
-  console.log("\n💡 SQL to create tables in Supabase:\n");
-  console.log(`CREATE TABLE IF NOT EXISTS users (
-  vk_id BIGINT PRIMARY KEY,
-  name TEXT DEFAULT 'Student',
-  created_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS schedule (
-  id SERIAL PRIMARY KEY,
-  user_id BIGINT REFERENCES users(vk_id),
-  subject TEXT,
-  day INTEGER,
-  start_time TEXT,
-  end_time TEXT,
-  location TEXT
-);
-
-CREATE TABLE IF NOT EXISTS tasks (
-  id SERIAL PRIMARY KEY,
-  user_id BIGINT REFERENCES users(vk_id),
-  title TEXT,
-  description TEXT,
-  due_date DATE,
-  priority TEXT DEFAULT 'normal',
-  completed BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP DEFAULT NOW()
-);`);
 }
 
 
