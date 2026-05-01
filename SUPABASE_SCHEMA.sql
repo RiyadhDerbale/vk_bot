@@ -141,3 +141,30 @@ CREATE TABLE IF NOT EXISTS tasks (
   completed BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT NOW()
 );
+
+
+
+
+// netlify/functions/supabase-client.mjs - Add connection pooling
+import { createClient } from '@supabase/supabase-js';
+
+let supabaseInstance = null;
+
+export function getSupabaseClient() {
+  if (!supabaseInstance) {
+    supabaseInstance = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_KEY,
+      {
+        auth: { persistSession: false },
+        db: { schema: 'public' },
+        global: {
+          headers: { 'x-application-name': 'vk-bot' },
+        },
+        // Keep connection alive
+        realtime: { params: { eventsPerSecond: 10 } }
+      }
+    );
+  }
+  return supabaseInstance;
+}

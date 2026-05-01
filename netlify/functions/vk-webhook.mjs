@@ -3149,6 +3149,49 @@ export async function checkReminders() {
 import { createClient } from "@supabase/supabase-js";
 import fetch from "node-fetch";
 
+// netlify/functions/vk-webhook.mjs - Add better error handling
+import { supabase } from './supabase-client.mjs';
+
+
+export const handler = async (event, context) => {
+  // Add connection retry logic
+  let retries = 3;
+  let lastError;
+  
+  while (retries > 0) {
+    try {
+      const result = await handleRequest(event);
+      return result;
+    } catch (error) {
+      lastError = error;
+      retries--;
+      if (retries > 0) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        continue;
+      }
+    }
+  }
+  
+  return {
+    statusCode: 500,
+    body: JSON.stringify({ error: lastError.message })
+  };
+};
+
+async function handleRequest(event) {
+  // Add connection keep-alive
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  
+  try {
+    // Your existing logic
+    const body = JSON.parse(event.body);
+    // ... process message
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // ==================== CONFIGURATION ====================
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
