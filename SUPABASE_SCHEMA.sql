@@ -115,15 +115,10 @@ CREATE POLICY "Allow service role" ON study_logs
 
 
 
-
-
--- Create tables (run in Supabase SQL editor)
 CREATE TABLE IF NOT EXISTS users (
   vk_id BIGINT PRIMARY KEY,
-  name TEXT DEFAULT '',
-  language TEXT DEFAULT 'en',
-  reminder_offset INTEGER DEFAULT 60,
-  join_date TIMESTAMP DEFAULT NOW()
+  name TEXT DEFAULT 'Student',
+  created_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS schedule (
@@ -139,64 +134,10 @@ CREATE TABLE IF NOT EXISTS schedule (
 CREATE TABLE IF NOT EXISTS tasks (
   id SERIAL PRIMARY KEY,
   user_id BIGINT REFERENCES users(vk_id),
-  task TEXT,
-  due_date TIMESTAMP,
-  remind_days INTEGER,
+  title TEXT,
+  description TEXT,
+  due_date DATE,
   priority TEXT DEFAULT 'normal',
-  done BOOLEAN DEFAULT FALSE,
-  completed_at TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS attendance (
-  id SERIAL PRIMARY KEY,
-  user_id BIGINT REFERENCES users(vk_id),
-  class_name TEXT,
-  date DATE,
-  attended BOOLEAN,
-  UNIQUE(user_id, class_name, date)
-);
-
-CREATE TABLE IF NOT EXISTS study_sessions (
-  id SERIAL PRIMARY KEY,
-  user_id BIGINT REFERENCES users(vk_id),
-  subject TEXT,
-  duration INTEGER,
-  date DATE
-);
-
-CREATE TABLE IF NOT EXISTS reminders (
-  key TEXT PRIMARY KEY,
-  sent INTEGER DEFAULT 1,
-  reminder_time TIMESTAMP DEFAULT NOW()
-);
-
--- Create indexes for performance
-CREATE INDEX idx_schedule_user_day ON schedule(user_id, day);
-CREATE INDEX idx_tasks_user_done ON tasks(user_id, done);
-CREATE INDEX idx_attendance_user_date ON attendance(user_id, date);
-CREATE INDEX idx_study_user_date ON study_sessions(user_id, date);
-
-
-
-
-
-
-
--- Create tables if they don't exist
-CREATE TABLE IF NOT EXISTS users (
-  vk_id BIGINT PRIMARY KEY,
-  name TEXT DEFAULT '',
-  language TEXT DEFAULT 'en',
-  reminder_offset INTEGER DEFAULT 60,
-  join_date TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS schedule (
-  id SERIAL PRIMARY KEY,
-  user_id BIGINT REFERENCES users(vk_id),
-  subject TEXT,
-  day INTEGER,
-  start_time TEXT,
-  end_time TEXT,
-  location TEXT
+  completed BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT NOW()
 );
