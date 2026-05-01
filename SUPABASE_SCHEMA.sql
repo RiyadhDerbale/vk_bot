@@ -110,3 +110,47 @@ CREATE POLICY "Allow service role" ON study_logs
   
 
 
+-- Users table
+CREATE TABLE users (
+  id SERIAL PRIMARY KEY,
+  vk_id BIGINT UNIQUE NOT NULL,
+  name TEXT,
+  language TEXT DEFAULT 'en',
+  reminder_offset INTEGER DEFAULT 30,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Schedule table
+CREATE TABLE schedule (
+  id SERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  subject TEXT NOT NULL,
+  day INTEGER NOT NULL,
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  location TEXT DEFAULT '',
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Tasks table
+CREATE TABLE tasks (
+  id SERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  title TEXT NOT NULL,
+  due_date DATE NOT NULL,
+  priority TEXT DEFAULT 'normal',
+  completed BOOLEAN DEFAULT FALSE,
+  remind_days INTEGER DEFAULT 2,
+  completed_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Study sessions table
+CREATE TABLE study_sessions (
+  id SERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  subject TEXT NOT NULL,
+  duration INTEGER NOT NULL,
+  date DATE NOT NULL,
+  timestamp TIMESTAMP DEFAULT NOW()
+);
