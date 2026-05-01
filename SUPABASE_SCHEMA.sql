@@ -110,12 +110,12 @@ CREATE POLICY "Allow service role" ON study_logs
   
 
 
-
 -- Create all tables
 CREATE TABLE IF NOT EXISTS users (
   vk_id BIGINT PRIMARY KEY,
   name TEXT DEFAULT 'Student',
   language TEXT DEFAULT 'en',
+  reminder_offset INTEGER DEFAULT 30,
   created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -136,8 +136,19 @@ CREATE TABLE IF NOT EXISTS tasks (
   title TEXT NOT NULL,
   description TEXT,
   due_date DATE NOT NULL,
+  remind_days INTEGER DEFAULT 2,
   priority TEXT DEFAULT 'normal',
   completed BOOLEAN DEFAULT FALSE,
+  completed_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS study_sessions (
+  id SERIAL PRIMARY KEY,
+  user_id BIGINT REFERENCES users(vk_id) ON DELETE CASCADE,
+  subject TEXT NOT NULL,
+  duration INTEGER NOT NULL,
+  date DATE NOT NULL,
   created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -151,8 +162,17 @@ CREATE TABLE IF NOT EXISTS attendance (
   UNIQUE(user_id, class_name, date)
 );
 
+CREATE TABLE IF NOT EXISTS reminders (
+  key TEXT PRIMARY KEY,
+  sent INTEGER DEFAULT 1,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
 -- Create indexes
 CREATE INDEX IF NOT EXISTS idx_schedule_user_id ON schedule(user_id);
+CREATE INDEX IF NOT EXISTS idx_schedule_day ON schedule(day);
 CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_completed ON tasks(completed);
+CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);
+CREATE INDEX IF NOT EXISTS idx_study_user_date ON study_sessions(user_id, date);
 CREATE INDEX IF NOT EXISTS idx_attendance_user_date ON attendance(user_id, date);
