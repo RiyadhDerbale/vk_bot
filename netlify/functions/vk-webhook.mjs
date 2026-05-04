@@ -536,20 +536,24 @@ async function getClasses(userId) {
 async function addClass(userId, subject, day, startTime, endTime, location = "") {
   console.log(`[DB] Adding: "${subject}" | Day ${day} | ${startTime}-${endTime} | ${location}`);
   
+  // Make sure userId is a string
+  const userIdStr = String(userId);
+  
   const { data, error } = await supabase
     .from("schedule")
     .insert({
-      user_id: userId,
-      subject,
+      user_id: userIdStr,
+      subject: String(subject),
       day: parseInt(day),
-      start_time: startTime,
-      end_time: endTime,
-      location: location || ""
+      start_time: String(startTime),
+      end_time: String(endTime),
+      location: String(location || "")
     })
     .select();
   
   if (error) {
     console.error(`[DB] Insert error:`, error);
+    console.error(`[DB] Error details:`, JSON.stringify(error));
     return false;
   }
   
@@ -557,22 +561,6 @@ async function addClass(userId, subject, day, startTime, endTime, location = "")
   cache.delete(`classes_${userId}`);
   clearUserCache(userId);
   return true;
-}
-
-async function addClassWithRetry(userId, subject, day, startTime, endTime, location, maxRetries = 3) {
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      const success = await addClass(userId, subject, day, startTime, endTime, location);
-      if (success) return true;
-      
-      console.log(`[DB] Retry ${i + 1}/${maxRetries} for: ${subject}`);
-      await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
-    } catch (error) {
-      console.error(`[DB] Retry ${i + 1} error:`, error);
-      if (i === maxRetries - 1) throw error;
-    }
-  }
-  return false;
 }
 
 async function updateClass(userId, classId, field, value) {
@@ -872,137 +860,141 @@ function getKeyboard(lang) {
   });
 }
 
-// ==================== ENHANCED ICS IMPORT ====================
+// ==================== SIMPLIFIED AND DEBUGGED ICS IMPORT ====================
 async function importICS(userId, source) {
-  console.log(`[ICS] Starting import for user ${userId}, source type: ${typeof source}`);
-  console.log(`[ICS] Source preview: ${typeof source === 'string' ? source.substring(0, 150) + '...' : 'unknown'}`);
+  console.log(`[ICS DEBUG] ========== START IMPORT ==========`);
+  console.log(`[ICS DEBUG] User ID: ${userId} (type: ${typeof userId})`);
+  console.log(`[ICS DEBUG] Source type: ${typeof source}`);
+  console.log(`[ICS DEBUG] Source length: ${source?.length || 0}`);
+  console.log(`[ICS DEBUG] First 200 chars: ${source?.substring(0, 200)}`);
   
   try {
     let content;
     
     // Handle URL import
     if (source.startsWith("http://") || source.startsWith("https://")) {
-      console.log(`[ICS] Fetching URL: ${source}`);
+      console.log(`[ICS DEBUG] Detected URL, fetching...`);
       try {
-        const res = await fetchWithTimeout(source, { 
-          headers: { "User-Agent": "Mozilla/5.0 (compatible; VKScheduleBot/1.0)" },
-          redirect: 'follow'
-        }, 15000);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        
+        const res = await fetch(source, { 
+          headers: { "User-Agent": "Mozilla/5.0" },
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
+        console.log(`[ICS DEBUG] URL response status: ${res.status}`);
         
         if (!res.ok) {
-          console.error(`[ICS] HTTP error: ${res.status} ${res.statusText}`);
-          return { success: false, error: `HTTP ${res.status}: ${res.statusText}` };
+          console.error(`[ICS DEBUG] HTTP error: ${res.status}`);
+          return { success: false, error: `HTTP ${res.status}: Cannot access the URL. Make sure it's a public calendar link.` };
         }
+        
         content = await res.text();
-        console.log(`[ICS] Downloaded ${content.length} bytes`);
+        console.log(`[ICS DEBUG] Downloaded ${content.length} bytes`);
       } catch (fetchError) {
-        console.error(`[ICS] Fetch error:`, fetchError);
-        return { success: false, error: `Failed to fetch: ${fetchError.message}` };
+        console.error(`[ICS DEBUG] Fetch error:`, fetchError.message);
+        return { success: false, error: `Cannot download the calendar. ${fetchError.message}. Try downloading the .ics file and attaching it directly.` };
       }
     } 
-    // Handle data URI
+    // Handle data URI (from file attachment)
     else if (source.startsWith("data:")) {
-      console.log(`[ICS] Processing data URI`);
+      console.log(`[ICS DEBUG] Detected data URI, decoding...`);
       try {
-        let match = source.match(/data:text\/calendar;charset=utf-8,?(.+)/i);
-        if (!match) match = source.match(/data:text\/calendar,?(.+)/i);
-        if (!match) match = source.match(/data:[^;]*,?(.+)/);
+        // Try multiple decode methods
+        let decoded = null;
         
-        if (match) {
-          content = decodeURIComponent(match[1]);
-          console.log(`[ICS] Decoded data URI, ${content.length} bytes`);
+        // Method 1: Standard data URI
+        const match1 = source.match(/data:text\/calendar[^,]*,?(.+)/i);
+        if (match1) {
+          decoded = match1[1];
+        }
+        
+        // Method 2: Simple split
+        if (!decoded) {
+          const parts = source.split(',');
+          if (parts.length > 1) {
+            decoded = parts.slice(1).join(',');
+          }
+        }
+        
+        if (decoded) {
+          try {
+            content = decodeURIComponent(decoded);
+          } catch (e) {
+            content = decoded; // Use as-is if decode fails
+          }
+          console.log(`[ICS DEBUG] Decoded data URI, ${content.length} bytes`);
         } else {
-          console.error(`[ICS] Invalid data URI format`);
-          return { success: false, error: "Invalid data URI format" };
+          console.error(`[ICS DEBUG] Could not decode data URI`);
+          return { success: false, error: "Invalid file format. Please attach a valid .ics file." };
         }
       } catch (decodeError) {
-        console.error(`[ICS] Data URI decode error:`, decodeError);
-        return { success: false, error: `Decode error: ${decodeError.message}` };
+        console.error(`[ICS DEBUG] Decode error:`, decodeError);
+        return { success: false, error: "Error reading the file. Make sure it's a valid .ics calendar file." };
       }
     } 
-    // Handle raw content
+    // Raw content
     else {
       content = source;
-      console.log(`[ICS] Raw content, ${content.length} bytes`);
+      console.log(`[ICS DEBUG] Using raw content, ${content.length} bytes`);
     }
     
     // Validate content
-    if (!content || content.length < 10) {
-      console.error(`[ICS] Content too short: ${content?.length || 0} bytes`);
-      return { success: false, error: "Empty or invalid content" };
+    if (!content || content.length < 20) {
+      console.error(`[ICS DEBUG] Content too short`);
+      return { success: false, error: "The file appears to be empty or too short. Please check the .ics file." };
     }
     
-    if (!content.includes("BEGIN:VCALENDAR") || !content.includes("BEGIN:VEVENT")) {
-      console.error(`[ICS] Missing VCALENDAR/VEVENT markers. First 200 chars:`);
-      console.error(content.substring(0, 200));
-      return { success: false, error: "Invalid ICS format - missing calendar markers" };
+    // Check for basic ICS structure
+    const hasCalendar = content.includes("BEGIN:VCALENDAR");
+    const hasEvent = content.includes("BEGIN:VEVENT");
+    
+    console.log(`[ICS DEBUG] Has VCALENDAR: ${hasCalendar}`);
+    console.log(`[ICS DEBUG] Has VEVENT: ${hasEvent}`);
+    
+    if (!hasCalendar && !hasEvent) {
+      console.error(`[ICS DEBUG] Not a valid ICS file`);
+      return { success: false, error: "This doesn't appear to be a valid .ics calendar file. The file should contain calendar event data." };
     }
     
-    // Unfold folded lines (ICS can have multi-line values)
-    content = content.replace(/\r?\n[ \t]/g, '');
-    
+    // Parse events using simple regex approach (more reliable)
     const events = [];
-    const lines = content.split(/\r?\n/);
-    let event = null;
+    const eventBlocks = content.split(/BEGIN:VEVENT/i);
     
-    for (let i = 0; i < lines.length; i++) {
-      const trimmed = lines[i].trim();
+    console.log(`[ICS DEBUG] Found ${eventBlocks.length - 1} event blocks`);
+    
+    for (let i = 1; i < eventBlocks.length; i++) {
+      const block = eventBlocks[i].split(/END:VEVENT/i)[0];
       
-      if (trimmed === "BEGIN:VEVENT") {
-        event = {};
-        console.log(`[ICS] Found event at line ${i}`);
-      } 
-      else if (trimmed === "END:VEVENT" && event) {
-        if (event.SUMMARY && event.DTSTART) {
-          events.push(event);
-          console.log(`[ICS] Added event: ${event.SUMMARY} at ${event.DTSTART}`);
-        } else {
-          console.log(`[ICS] Skipping incomplete event: SUMMARY=${!!event.SUMMARY}, DTSTART=${!!event.DTSTART}`);
-        }
-        event = null;
-      } 
-      else if (event) {
-        const colonIdx = trimmed.indexOf(":");
-        const semicolonIdx = trimmed.indexOf(";");
-        
-        if (colonIdx > 0) {
-          let key, value;
-          
-          if (semicolonIdx > 0 && semicolonIdx < colonIdx) {
-            key = trimmed.substring(0, semicolonIdx);
-            value = trimmed.substring(colonIdx + 1);
-          } else {
-            key = trimmed.substring(0, colonIdx);
-            value = trimmed.substring(colonIdx + 1);
-          }
-          
-          if (event[key]) {
-            if (Array.isArray(event[key])) {
-              event[key].push(value);
-            } else {
-              event[key] = [event[key], value];
-            }
-          } else {
-            event[key] = value;
-          }
-        }
+      // Extract fields
+      const summary = extractField(block, "SUMMARY");
+      const dtstart = extractField(block, "DTSTART");
+      const dtend = extractField(block, "DTEND");
+      const location = extractField(block, "LOCATION");
+      
+      if (summary && dtstart) {
+        events.push({ SUMMARY: summary, DTSTART: dtstart, DTEND: dtend, LOCATION: location });
+        console.log(`[ICS DEBUG] Event ${i}: ${summary} | ${dtstart} -> ${dtend || 'no end'} | ${location || 'no location'}`);
+      } else {
+        console.log(`[ICS DEBUG] Skipping event ${i}: missing SUMMARY or DTSTART`);
       }
     }
     
-    console.log(`[ICS] Parsed ${events.length} events successfully`);
+    console.log(`[ICS DEBUG] Parsed ${events.length} valid events`);
     
     if (events.length === 0) {
-      return { success: false, error: "No valid events found in calendar" };
+      return { success: false, error: "No valid events found in the calendar. The file might be empty or in an unsupported format." };
     }
     
-    // Get existing classes for deduplication
-    let existing;
+    // Get existing classes
+    let existing = [];
     try {
       existing = await getClasses(userId);
-      console.log(`[ICS] Existing classes: ${existing.length}`);
-    } catch (dbError) {
-      console.error(`[ICS] Error fetching existing classes:`, dbError);
-      existing = [];
+      console.log(`[ICS DEBUG] Existing classes in DB: ${existing.length}`);
+    } catch (e) {
+      console.error(`[ICS DEBUG] Error fetching existing:`, e);
     }
     
     let imported = 0;
@@ -1011,162 +1003,140 @@ async function importICS(userId, source) {
     
     for (const ev of events) {
       try {
-        // Parse DTSTART - handle multiple formats
-        let startDate = null;
-        let dtstart = ev.DTSTART;
+        // Parse date
+        let dateStr = ev.DTSTART.replace(/^.*:/, ''); // Remove any prefix
+        const dateMatch = dateStr.match(/(\d{4})(\d{2})(\d{2})T?(\d{2})?(\d{2})?/);
         
-        // Handle array of DTSTART values
-        if (Array.isArray(dtstart)) {
-          dtstart = dtstart[0];
-        }
-        
-        // Remove VALUE=DATE prefix if present
-        if (typeof dtstart === 'string' && dtstart.includes(':')) {
-          dtstart = dtstart.split(':').pop();
-        }
-        
-        // Try different date formats
-        const dateMatch = dtstart?.match(/(\d{4})(\d{2})(\d{2})T?(\d{2})?(\d{2})?(\d{2})?/);
-        if (dateMatch) {
-          const year = parseInt(dateMatch[1]);
-          const month = parseInt(dateMatch[2]) - 1;
-          const day = parseInt(dateMatch[3]);
-          const hours = dateMatch[4] ? parseInt(dateMatch[4]) : 9;
-          const minutes = dateMatch[5] ? parseInt(dateMatch[5]) : 0;
-          
-          startDate = new Date(year, month, day, hours, minutes);
-          
-          if (isNaN(startDate.getTime())) {
-            console.error(`[ICS] Invalid date: ${dtstart}`);
-            continue;
-          }
-        } else {
-          console.error(`[ICS] Cannot parse date: ${dtstart}`);
+        if (!dateMatch) {
+          console.error(`[ICS DEBUG] Cannot parse date: ${dateStr}`);
           continue;
         }
         
-        // Convert to weekday (0=Mon, 6=Sun)
+        const year = parseInt(dateMatch[1]);
+        const month = parseInt(dateMatch[2]) - 1;
+        const day = parseInt(dateMatch[3]);
+        const hour = dateMatch[4] ? parseInt(dateMatch[4]) : 9;
+        const minute = dateMatch[5] ? parseInt(dateMatch[5]) : 0;
+        
+        const startDate = new Date(year, month, day, hour, minute);
+        
+        // Get day of week (0=Mon, 6=Sun)
         let weekday = startDate.getDay();
         weekday = weekday === 0 ? 6 : weekday - 1;
         
-        const startTime = `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
+        const startTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
         
-        // Parse DTEND
-        let endH = startDate.getHours() + 1;
-        let endM = startDate.getMinutes();
+        // Parse end time
+        let endHour = hour + 1;
+        let endMinute = minute;
         
-        let dtend = ev.DTEND;
-        if (Array.isArray(dtend)) {
-          dtend = dtend[0];
-        }
-        if (typeof dtend === 'string' && dtend.includes(':')) {
-          dtend = dtend.split(':').pop();
-        }
-        
-        const endMatch = dtend?.match(/(\d{4})(\d{2})(\d{2})T?(\d{2})?(\d{2})?/);
-        if (endMatch) {
-          endH = endMatch[4] ? parseInt(endMatch[4]) : endH;
-          endM = endMatch[5] ? parseInt(endMatch[5]) : endM;
+        if (ev.DTEND) {
+          let endStr = ev.DTEND.replace(/^.*:/, '');
+          const endMatch = endStr.match(/(\d{4})(\d{2})(\d{2})T?(\d{2})?(\d{2})?/);
+          if (endMatch && endMatch[4]) {
+            endHour = parseInt(endMatch[4]);
+            endMinute = endMatch[5] ? parseInt(endMatch[5]) : 0;
+          }
         }
         
-        const endTime = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+        const endTime = `${String(endHour).padStart(2, '0')}:${String(endMinute).padStart(2, '0')}`;
         
-        // Parse SUMMARY
-        let subject = ev.SUMMARY;
-        if (Array.isArray(subject)) {
-          subject = subject[0];
-        }
-        subject = (subject || "Class")
+        // Clean subject
+        const subject = (ev.SUMMARY || "Untitled")
           .replace(/\\,/g, ",")
           .replace(/\\;/g, ";")
           .replace(/\\n/g, " ")
-          .trim()
-          .substring(0, 100);
+          .trim();
         
-        // Parse LOCATION
-        let location = ev.LOCATION || "";
-        if (Array.isArray(location)) {
-          location = location[0];
-        }
-        location = location
+        // Clean location
+        const location = (ev.LOCATION || "")
           .replace(/\\,/g, ",")
           .replace(/\\;/g, ";")
-          .trim()
-          .substring(0, 200);
+          .trim();
         
-        // Check for duplicates
-        const isDuplicate = existing.some(c => 
+        console.log(`[ICS DEBUG] Processing: ${subject} | Day ${weekday} | ${startTime}-${endTime}`);
+        
+        // Check duplicate
+        const isDup = existing.some(c => 
           c.subject === subject && 
           c.day === weekday && 
-          c.start_time === startTime &&
-          c.end_time === endTime
+          c.start_time === startTime
         );
         
-        if (isDuplicate) {
+        if (isDup) {
           duplicates++;
-          console.log(`[ICS] Duplicate skipped: ${subject}`);
+          console.log(`[ICS DEBUG] Duplicate: ${subject}`);
           continue;
         }
         
-        // Add class to database with retry
-        const success = await addClassWithRetry(userId, subject, weekday, startTime, endTime, location);
+        // INSERT INTO DATABASE
+        console.log(`[ICS DEBUG] Attempting DB insert for: ${subject}`);
         
-        if (success) {
-          imported++;
-          console.log(`[ICS] ✅ Added: ${subject} | Day ${weekday} | ${startTime}-${endTime} | ${location}`);
-          
-          // Rate limiting for large imports
-          if (imported > 0 && imported % 10 === 0 && events.length > 50) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-            console.log(`[ICS] Rate limit pause at ${imported} imports`);
-          }
+        const { data, error } = await supabase
+          .from("schedule")
+          .insert({
+            user_id: String(userId),
+            subject: subject,
+            day: weekday,
+            start_time: startTime,
+            end_time: endTime,
+            location: location
+          })
+          .select();
+        
+        if (error) {
+          console.error(`[ICS DEBUG] DB insert error:`, error);
+          console.error(`[ICS DEBUG] Error code: ${error.code}, message: ${error.message}`);
+          errors.push(`DB error for ${subject}: ${error.message}`);
         } else {
-          errors.push(`Failed to add: ${subject}`);
-          console.error(`[ICS] ❌ Failed to add: ${subject}`);
+          console.log(`[ICS DEBUG] ✅ Inserted ID: ${data?.[0]?.id}`);
+          imported++;
         }
       } catch (eventError) {
-        console.error(`[ICS] Error processing event:`, eventError);
-        errors.push(`Event processing error: ${eventError.message}`);
+        console.error(`[ICS DEBUG] Event processing error:`, eventError);
+        errors.push(eventError.message);
       }
     }
     
-    console.log(`[ICS] Import complete: ${imported} new, ${duplicates} duplicates, ${errors.length} errors`);
+    console.log(`[ICS DEBUG] ========== IMPORT COMPLETE ==========`);
+    console.log(`[ICS DEBUG] Imported: ${imported}, Duplicates: ${duplicates}, Errors: ${errors.length}`);
     
-    // Clear all caches to ensure fresh data
+    // Clear cache
     clearUserCache(userId);
     cache.delete(`classes_${userId}`);
     
-    // Verify import by checking database
-    try {
-      const verifyClasses = await getClasses(userId);
-      console.log(`[ICS] Verification: ${verifyClasses.length} classes in DB after import`);
-    } catch (verifyError) {
-      console.error(`[ICS] Verification error:`, verifyError);
-    }
-    
-    if (imported === 0 && errors.length > 0 && duplicates === 0) {
+    if (imported === 0 && errors.length > 0) {
       return { 
         success: false, 
-        error: `Import failed: ${errors.slice(0, 3).join('; ')}`,
-        count: 0,
-        total: events.length,
-        duplicates 
+        error: `Could not import any classes. Errors: ${errors.slice(0, 3).join('; ')}` 
+      };
+    }
+    
+    if (imported === 0 && duplicates > 0) {
+      return { 
+        success: false, 
+        error: "All events already exist in your schedule. No new classes added." 
       };
     }
     
     return { 
-      success: true,
+      success: true, 
       count: imported, 
       total: events.length, 
-      duplicates,
-      errors: errors.length > 0 ? errors : undefined
+      duplicates 
     };
     
   } catch (e) {
-    console.error(`[ICS] Fatal import error:`, e);
-    console.error(`[ICS] Error stack:`, e.stack);
-    return { success: false, error: `Import failed: ${e.message}` };
+    console.error(`[ICS DEBUG] Fatal error:`, e);
+    return { success: false, error: `Unexpected error: ${e.message}` };
   }
+}
+
+// Helper function to extract ICS fields
+function extractField(block, fieldName) {
+  const regex = new RegExp(`^${fieldName}(?:;[^:]*)?:(.+)$`, 'im');
+  const match = block.match(regex);
+  return match ? match[1].trim() : null;
 }
 
 // ==================== STUDY TIMER ====================
@@ -1239,42 +1209,6 @@ async function processMessage(userId, text, lang) {
   // ===== HELP =====
   if (lower === "help" || lower === "/help" || lower === "помощь" || lower === "帮助" || msg.includes("❓")) {
     await sendVkMessage(userId, t(lang, "help"), getKeyboard(lang));
-    return;
-  }
-  
-  // ===== DAILY BRIEFING =====
-  if (lower === "briefing" || lower === "morning" || lower === "брифинг" || lower === "简报") {
-    const user = await getUser(userId);
-    const todayClasses = await getTodayClasses(userId);
-    const pendingTasks = await getTasks(userId, true);
-    const weekdays = T[lang].weekdays;
-    const today = getTodayIndex();
-    
-    let todaySchedule = "";
-    if (todayClasses.length === 0) {
-      todaySchedule = t(lang, "no_classes_today");
-    } else {
-      for (const c of todayClasses) {
-        todaySchedule += `⏰ ${c.start_time}-${c.end_time} | ${c.subject}\n`;
-      }
-    }
-    
-    let priorities = "";
-    const highPriorityTasks = pendingTasks.filter(t => t.priority === "high");
-    if (highPriorityTasks.length > 0) {
-      priorities = "🔴 High Priority:\n";
-      for (const t of highPriorityTasks.slice(0, 3)) {
-        priorities += `• ${t.title}\n`;
-      }
-    } else {
-      priorities = "✅ All clear!";
-    }
-    
-    let firstClass = todayClasses.length > 0 ? todayClasses[0].subject + " at " + todayClasses[0].start_time : "None";
-    const quotes = T[lang].motivation_quotes;
-    const motivation = quotes[Math.floor(Math.random() * quotes.length)];
-    
-    await sendVkMessage(userId, `🌅 *Good Morning, ${user?.name || "Student"}!*\n\n📅 *${weekdays[today]}*\n${todaySchedule}\n📝 *Priorities*\n${priorities}\n⏰ *First Class*: ${firstClass}\n\n💪 ${motivation}`, getKeyboard(lang));
     return;
   }
   
@@ -1360,8 +1294,6 @@ async function processMessage(userId, text, lang) {
   if (lower === "next" || lower === "следующая" || lower === "下一节" || lower === "下一个" || 
       lower === "what's next" || lower === "what next" || lower === "что дальше" || lower === "接下来") {
     const next = await getNextClass(userId);
-    const user = await getUser(userId);
-    const reminder = user?.reminder_offset || 30;
     
     if (!next) {
       await sendVkMessage(userId, t(lang, "no_next_class"), getKeyboard(lang));
@@ -1481,7 +1413,7 @@ async function processMessage(userId, text, lang) {
     return;
   }
   
-  // ===== COMPLETE TASK =====
+  // ===== COMPLETE/SNOOZE/DELETE TASK =====
   if (lower.startsWith("/complete")) {
     const id = parseInt(msg.split(/\s+/)[1]);
     if (!isNaN(id)) {
@@ -1497,7 +1429,6 @@ async function processMessage(userId, text, lang) {
     return;
   }
   
-  // ===== SNOOZE TASK =====
   if (lower.startsWith("/snooze")) {
     const parts = msg.split(/\s+/);
     const id = parseInt(parts[1]);
@@ -1514,7 +1445,6 @@ async function processMessage(userId, text, lang) {
     return;
   }
   
-  // ===== DELETE TASK =====
   if (lower.startsWith("/delete_task")) {
     const id = parseInt(msg.split(/\s+/)[1]);
     if (!isNaN(id)) {
@@ -1575,7 +1505,7 @@ async function processMessage(userId, text, lang) {
     return;
   }
   
-  // ===== REMINDER =====
+  // ===== SETTINGS =====
   if (lower.startsWith("/remind")) {
     const mins = parseInt(msg.split(/\s+/)[1]);
     if (!isNaN(mins) && mins >= 5 && mins <= 120) {
@@ -1588,7 +1518,6 @@ async function processMessage(userId, text, lang) {
     return;
   }
   
-  // ===== QUIET MODE =====
   if (lower === "/quiet") {
     const quietUntil = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
     await updateUser(userId, { quiet_mode: true, quiet_until: quietUntil });
@@ -1616,11 +1545,10 @@ async function processMessage(userId, text, lang) {
           duplicates: result.duplicates 
         }), getKeyboard(lang));
         
-        // AUTO-DISPLAY IMPORTED SCHEDULE
+        // Auto-display schedule after 2 seconds
         setTimeout(async () => {
           clearUserCache(userId);
           const classes = await getClasses(userId);
-          console.log(`[ICS] Post-import check: ${classes.length} classes in DB`);
           
           if (classes.length > 0) {
             const days = T[lang].weekdays;
@@ -1639,10 +1567,7 @@ async function processMessage(userId, text, lang) {
             }
             
             scheduleMsg += `\n📊 *Total: ${classes.length} classes*\n\nCommands: Today | Tomorrow | Next | Schedule`;
-            
             await sendVkMessage(userId, scheduleMsg, getKeyboard(lang));
-          } else {
-            await sendVkMessage(userId, "⚠️ Import reported success but no classes found. Please try again.", getKeyboard(lang));
           }
         }, 2000);
         
@@ -1695,62 +1620,6 @@ async function processMessage(userId, text, lang) {
       score,
       productivity_message: message
     }), getKeyboard(lang));
-    return;
-  }
-  
-  // ===== NOW =====
-  if (lower.includes("now") || lower.includes("сейчас") || lower.includes("现在")) {
-    const todayClasses = await getTodayClasses(userId);
-    const currentTime = getCurrentTime();
-    
-    const currentClass = todayClasses.find(c => 
-      c.start_time <= currentTime && c.end_time >= currentTime
-    );
-    
-    if (currentClass) {
-      await sendVkMessage(userId, `🟢 You're in *${currentClass.subject}* right now!\n⏰ ${currentClass.start_time}-${currentClass.end_time}\n📍 ${currentClass.location || "—"}\n📖 Ends at ${currentClass.end_time}`, getKeyboard(lang));
-    } else {
-      const nextClass = todayClasses.find(c => c.start_time > currentTime);
-      if (nextClass) {
-        const [h, m] = nextClass.start_time.split(":").map(Number);
-        const classTime = new Date();
-        classTime.setHours(h, m, 0, 0);
-        const mins = Math.round((classTime - new Date()) / 60000);
-        await sendVkMessage(userId, `⏳ No class right now.\n\nNext: *${nextClass.subject}* at ${nextClass.start_time} (in ${mins} minutes)`, getKeyboard(lang));
-      } else {
-        await sendVkMessage(userId, t(lang, "no_classes_today"), getKeyboard(lang));
-      }
-    }
-    return;
-  }
-  
-  // ===== ALL TASKS =====
-  if (lower === "all tasks" || lower === "все задачи" || lower === "所有任务") {
-    const tasks = await getTasks(userId, false);
-    
-    if (tasks.length === 0) {
-      await sendVkMessage(userId, "📝 No tasks at all. Add one with /task!", getKeyboard(lang));
-      return;
-    }
-    
-    const header = lang === "ru" ? "📝 *Все задачи*" : lang === "zh" ? "📝 *所有任务*" : "📝 *All Tasks*";
-    let response = `${header} (${tasks.length} total)\n\n`;
-    
-    for (const task of tasks) {
-      const status = task.completed ? "✅" : "⏳";
-      const prio = task.priority || "normal";
-      const prioEmoji = prio === "high" ? "🔴" : prio === "medium" ? "🟡" : "🟢";
-      
-      response += `${status} 🆔 ${task.id} | ${prioEmoji}\n`;
-      response += `   📖 ${task.title}\n`;
-      response += `   📅 ${task.due_date}\n`;
-      if (!task.completed) {
-        response += `   ✅ /complete ${task.id}\n`;
-      }
-      response += "\n";
-    }
-    
-    await sendVkMessage(userId, response, getKeyboard(lang));
     return;
   }
   
@@ -1814,7 +1683,8 @@ export async function handler(event) {
       const text = msg.text || "";
       const attachments = msg.attachments || [];
       
-      console.log(`[${userId}] ${text.substring(0, 100)}`);
+      console.log(`[${userId}] Message: ${text.substring(0, 100)}`);
+      console.log(`[${userId}] Attachments: ${attachments.length}`);
       
       const detectedLang = detectLanguage(text);
       let user = await getUser(userId);
@@ -1827,7 +1697,7 @@ export async function handler(event) {
       const lang = user?.language || detectedLang;
       const userName = user?.name;
       
-      // ===== ICS FILE ATTACHMENT WITH AUTO-DISPLAY =====
+      // ===== ICS FILE ATTACHMENT =====
       const icsFile = attachments.find(a => {
         if (a.type === "doc") {
           const title = (a.doc?.title || "").toLowerCase();
@@ -1838,18 +1708,18 @@ export async function handler(event) {
       });
       
       if (icsFile) {
-        console.log(`[${userId}] ICS file detected:`, {
-          title: icsFile.doc?.title,
-          ext: icsFile.doc?.ext,
-          size: icsFile.doc?.size,
-          url: icsFile.doc?.url?.substring(0, 50) + '...'
-        });
+        console.log(`[${userId}] ICS file detected: ${icsFile.doc?.title}`);
         
         await sendVkMessage(userId, t(lang, "import_start"), getKeyboard(lang));
         
         try {
-          const res = await fetchWithTimeout(icsFile.doc.url, {}, 20000);
+          // Download the file content
+          const res = await fetch(icsFile.doc.url);
           const content = await res.text();
+          
+          console.log(`[${userId}] ICS file downloaded: ${content.length} bytes`);
+          
+          // Import with data URI prefix
           const result = await importICS(userId, `data:text/calendar,${encodeURIComponent(content)}`);
           
           if (result.success) {
@@ -1859,11 +1729,10 @@ export async function handler(event) {
               duplicates: result.duplicates 
             }), getKeyboard(lang));
             
-            // AUTO-DISPLAY AFTER FILE IMPORT
+            // Auto-display schedule
             setTimeout(async () => {
               clearUserCache(userId);
               const classes = await getClasses(userId);
-              console.log(`[ICS File] Post-import: ${classes.length} classes`);
               
               if (classes.length > 0) {
                 const days = T[lang].weekdays;
@@ -1881,8 +1750,7 @@ export async function handler(event) {
                   }
                 }
                 
-                scheduleMsg += `\n📊 *Total: ${classes.length} classes*\n\nCommands: Today | Tomorrow | Next | Schedule`;
-                
+                scheduleMsg += `\n📊 *Total: ${classes.length} classes*`;
                 await sendVkMessage(userId, scheduleMsg, getKeyboard(lang));
               }
             }, 2000);
@@ -1891,9 +1759,10 @@ export async function handler(event) {
             await sendVkMessage(userId, t(lang, "import_fail", { error: result.error }), getKeyboard(lang));
           }
         } catch (e) {
-          console.error("File import error:", e);
+          console.error(`[${userId}] File import error:`, e);
           await sendVkMessage(userId, t(lang, "import_fail", { error: e.message }), getKeyboard(lang));
         }
+        
         return { statusCode: 200, body: JSON.stringify({ ok: true }) };
       }
       
