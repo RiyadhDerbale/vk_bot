@@ -1,544 +1,542 @@
-import logging
-logging.basicConfig(level=logging.DEBUG)
-import collections
-import collections.abc
-
-# Fix for old tatsu library on Python 3.10+
-if not hasattr(collections, 'Mapping'):
-    collections.Mapping = collections.abc.Mapping
-if not hasattr(collections, 'MutableMapping'):
-    collections.MutableMapping = collections.abc.MutableMapping
-
-import sqlite3
-import json
-import logging
-import requests
-from datetime import datetime, timedelta
-
-
-import vk_api
-from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
-from vk_api.keyboard import VkKeyboard, VkKeyboardColor
-from vk_api.utils import get_random_id
-from icalendar import Calendar
-from apscheduler.schedulers.background import BackgroundScheduler
-import pytz
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-#========== CONFIGURATION ==========
-VK_TOKEN = "vk1.a.eZvEbyVQo2aLD4K-r_7DxudJLQ4iNke42CLOnxo-ewzkJhDCjgY-FFImW2JeNulCAByv9bzkSuo_VXZFEV1GbMGoTfjD_TlDUV_pfIIfXU2eJvNsYIVFvVRa7OQxAhzGJPle69aDCxH7jYlu-LbbfSLM-9ZVDiOkmo3zSdgiWYegoSqKJqtGAGoyldsJYC79Fc9up1aNsvk3uJ3NZaE6Xg"
-GROUP_ID = 237363984          # Replace with your group ID
-TIMEZONE = pytz.timezone("Asia/Novosibirsk")  # Change to your local timezone
-
-
-
-    
-# ========== DATABASE INIT ==========
-def init_db():
-    conn = sqlite3.connect("student_bot.db")
-    c = conn.cursor()
-    c.execute("""CREATE TABLE IF NOT EXISTS users (
-        vk_id INTEGER PRIMARY KEY,
-        notify_offset INTEGER DEFAULT 60
-    )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS schedule (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        subject TEXT,
-        day_of_week INTEGER,
-        start_time TEXT,
-        end_time TEXT
-    )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS deadlines (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        task TEXT,
-        due_date TEXT,
-        remind_days INTEGER,
-        done BOOLEAN DEFAULT 0
-    )""")
-    conn.commit()
-    conn.close()
-
-init_db()
-
-# ========== DATABASE HELPERS ==========
-def get_user_offset(user_id):
-    conn = sqlite3.connect("student_bot.db")
-    c = conn.cursor()
-    c.execute("SELECT notify_offset FROM users WHERE vk_id = ?", (user_id,))
-    row = c.fetchone()
-    conn.close()
-    return row[0] if row else 60
-
-def set_user_offset(user_id, minutes):
-    conn = sqlite3.connect("student_bot.db")
-    c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO users (vk_id, notify_offset) VALUES (?, ?)", (user_id, minutes))
-    conn.commit()
-    conn.close()
-
-def add_schedule(user_id, subject, day_of_week, start_time, end_time):
-    conn = sqlite3.connect("student_bot.db")
-    c = conn.cursor()
-    c.execute("INSERT INTO schedule (user_id, subject, day_of_week, start_time, end_time) VALUES (?,?,?,?,?)",
-              (user_id, subject, day_of_week, start_time, end_time))
-    conn.commit()
-    conn.close()
-
-def get_schedule(user_id):
-    conn = sqlite3.connect("student_bot.db")
-    c = conn.cursor()
-    c.execute("SELECT subject, day_of_week, start_time, end_time FROM schedule WHERE user_id = ?", (user_id,))
-    rows = c.fetchall()
-    conn.close()
-    return rows
-
-def delete_schedule(user_id, subject, day_of_week, start_time):
-    conn = sqlite3.connect("student_bot.db")
-    c = conn.cursor()
-    c.execute("DELETE FROM schedule WHERE user_id=? AND subject=? AND day_of_week=? AND start_time=?",
-              (user_id, subject, day_of_week, start_time))
-    conn.commit()
-    conn.close()
-
-def add_deadline(user_id, task, due_date, remind_days):
-    conn = sqlite3.connect("student_bot.db")
-    c = conn.cursor()
-    c.execute("INSERT INTO deadlines (user_id, task, due_date, remind_days, done) VALUES (?,?,?,?,0)",
-              (user_id, task, due_date, remind_days))
-    conn.commit()
-    conn.close()
-
-def get_deadlines(user_id, only_pending=True):
-    conn = sqlite3.connect("student_bot.db")
-    c = conn.cursor()
-    if only_pending:
-        c.execute("SELECT id, task, due_date, remind_days FROM deadlines WHERE user_id=? AND done=0", (user_id,))
-    else:
-        c.execute("SELECT id, task, due_date, remind_days, done FROM deadlines WHERE user_id=?", (user_id,))
-    rows = c.fetchall()
-    conn.close()
-    return rows
-
-def mark_deadline_done(deadline_id, user_id):
-    conn = sqlite3.connect("student_bot.db")
-    c = conn.cursor()
-    c.execute("UPDATE deadlines SET done=1 WHERE id=? AND user_id=?", (deadline_id, user_id))
-    conn.commit()
-    conn.close()
-
-# ========== ICS PARSING ==========
-#def parse_ics_and_save(user_id, ics_content):
+#import logging
+#logging.basicConfig(level=logging.DEBUG)
+#import collections
+#import collections.abc
+#
+## Fix for old tatsu library on Python 3.10+
+#if not hasattr(collections, 'Mapping'):
+#    collections.Mapping = collections.abc.Mapping
+#if not hasattr(collections, 'MutableMapping'):
+#    collections.MutableMapping = collections.abc.MutableMapping
+#
+#import sqlite3
+#import json
+#import logging
+#import requests
+#from datetime import datetime, timedelta
+#
+#
+#import vk_api
+#from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
+#from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+#from vk_api.utils import get_random_id
+#from icalendar import Calendar
+#from apscheduler.schedulers.background import BackgroundScheduler
+#import pytz
+#
+#logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+##========== CONFIGURATION ==========
+#VK_TOKEN = "vk1.a.eZvEbyVQo2aLD4K-r_7DxudJLQ4iNke42CLOnxo-ewzkJhDCjgY-FFImW2JeNulCAByv9bzkSuo_VXZFEV1GbMGoTfjD_TlDUV_pfIIfXU2eJvNsYIVFvVRa7OQxAhzGJPle69aDCxH7jYlu-LbbfSLM-9ZVDiOkmo3zSdgiWYegoSqKJqtGAGoyldsJYC79Fc9up1aNsvk3uJ3NZaE6Xg"
+#GROUP_ID = 237363984          # Replace with your group ID
+#TIMEZONE = pytz.timezone("Asia/Novosibirsk")  # Change to your local timezone
+#
+#
+#
+#    
+## ========== DATABASE INIT ==========
+#def init_db():
+#    conn = sqlite3.connect("student_bot.db")
+#    c = conn.cursor()
+#    c.execute("""CREATE TABLE IF NOT EXISTS users (
+#        vk_id INTEGER PRIMARY KEY,
+#        notify_offset INTEGER DEFAULT 60
+#    )""")
+#    c.execute("""CREATE TABLE IF NOT EXISTS schedule (
+#        id INTEGER PRIMARY KEY AUTOINCREMENT,
+#        user_id INTEGER,
+#        subject TEXT,
+#        day_of_week INTEGER,
+#        start_time TEXT,
+#        end_time TEXT
+#    )""")
+#    c.execute("""CREATE TABLE IF NOT EXISTS deadlines (
+#        id INTEGER PRIMARY KEY AUTOINCREMENT,
+#        user_id INTEGER,
+#        task TEXT,
+#        due_date TEXT,
+#        remind_days INTEGER,
+#        done BOOLEAN DEFAULT 0
+#    )""")
+#    conn.commit()
+#    conn.close()
+#
+#init_db()
+#
+## ========== DATABASE HELPERS ==========
+#def get_user_offset(user_id):
+#    conn = sqlite3.connect("student_bot.db")
+#    c = conn.cursor()
+#    c.execute("SELECT notify_offset FROM users WHERE vk_id = ?", (user_id,))
+#    row = c.fetchone()
+#    conn.close()
+#    return row[0] if row else 60
+#
+#def set_user_offset(user_id, minutes):
+#    conn = sqlite3.connect("student_bot.db")
+#    c = conn.cursor()
+#    c.execute("INSERT OR REPLACE INTO users (vk_id, notify_offset) VALUES (?, ?)", (user_id, minutes))
+#    conn.commit()
+#    conn.close()
+#
+#def add_schedule(user_id, subject, day_of_week, start_time, end_time):
+#    conn = sqlite3.connect("student_bot.db")
+#    c = conn.cursor()
+#    c.execute("INSERT INTO schedule (user_id, subject, day_of_week, start_time, end_time) VALUES (?,?,?,?,?)",
+#              (user_id, subject, day_of_week, start_time, end_time))
+#    conn.commit()
+#    conn.close()
+#
+#def get_schedule(user_id):
+#    conn = sqlite3.connect("student_bot.db")
+#    c = conn.cursor()
+#    c.execute("SELECT subject, day_of_week, start_time, end_time FROM schedule WHERE user_id = ?", (user_id,))
+#    rows = c.fetchall()
+#    conn.close()
+#    return rows
+#
+#def delete_schedule(user_id, subject, day_of_week, start_time):
+#    conn = sqlite3.connect("student_bot.db")
+#    c = conn.cursor()
+#    c.execute("DELETE FROM schedule WHERE user_id=? AND subject=? AND day_of_week=? AND start_time=?",
+#              (user_id, subject, day_of_week, start_time))
+#    conn.commit()
+#    conn.close()
+#
+#def add_deadline(user_id, task, due_date, remind_days):
+#    conn = sqlite3.connect("student_bot.db")
+#    c = conn.cursor()
+#    c.execute("INSERT INTO deadlines (user_id, task, due_date, remind_days, done) VALUES (?,?,?,?,0)",
+#              (user_id, task, due_date, remind_days))
+#    conn.commit()
+#    conn.close()
+#
+#def get_deadlines(user_id, only_pending=True):
+#    conn = sqlite3.connect("student_bot.db")
+#    c = conn.cursor()
+#    if only_pending:
+#        c.execute("SELECT id, task, due_date, remind_days FROM deadlines WHERE user_id=? AND done=0", (user_id,))
+#    else:
+#        c.execute("SELECT id, task, due_date, remind_days, done FROM deadlines WHERE user_id=?", (user_id,))
+#    rows = c.fetchall()
+#    conn.close()
+#    return rows
+#
+#def mark_deadline_done(deadline_id, user_id):
+#    conn = sqlite3.connect("student_bot.db")
+#    c = conn.cursor()
+#    c.execute("UPDATE deadlines SET done=1 WHERE id=? AND user_id=?", (deadline_id, user_id))
+#    conn.commit()
+#    conn.close()
+#
+## ========== ICS PARSING ==========
+##def parse_ics_and_save(user_id, ics_content):
+##    try:
+##        cal = Calendar(ics_content)
+##        count = 0
+##        for event in cal.events:
+##            subject = event.name
+##            start = event.begin.datetime
+##            end = event.end.datetime
+##            day_of_week = start.weekday()
+##            start_time = start.strftime("%H:%M")
+##            end_time = end.strftime("%H:%M")
+##            add_schedule(user_id, subject, day_of_week, start_time, end_time)
+##            count += 1
+##        return count
+##    except Exception as e:
+##        logging.error(f"ICS parsing error: {e}")
+##        return 0
+#
+##def parse_ics_and_save(user_id, ics_content):
+##    try:
+##        cal = Calendar.from_ical(ics_content)
+##        count = 0
+##        for component in cal.walk():
+##            if component.name == "VEVENT":
+##                subject = str(component.get('SUMMARY', 'No title'))
+##                dtstart = component.get('DTSTART')
+##                dtend = component.get('DTEND')
+##                if dtstart is None or dtend is None:
+##                    continue
+##                start = dtstart.dt
+##                end = dtend.dt
+##                # Handle all-day events (date only)
+##                if not isinstance(start, datetime):
+##                    start = datetime.combine(start, datetime.min.time())
+##                if not isinstance(end, datetime):
+##                    end = datetime.combine(end, datetime.min.time())
+##                day_of_week = start.weekday()
+##                start_time = start.strftime("%H:%M")
+##                end_time = end.strftime("%H:%M")
+##                add_schedule(user_id, subject, day_of_week, start_time, end_time)
+##                count += 1
+##        return count
+##    except Exception as e:
+##        logging.error(f"ICS parsing error: {e}")
+##        return 0 
+#    
+#    # Add this new function near your other ICS functions (around line 150)
+#
+#def parse_ics_from_url(user_id, ics_url):
+#    """Download and parse ICS file from a URL"""
 #    try:
-#        cal = Calendar(ics_content)
+#        # Download the ICS file
+#        response = requests.get(ics_url, timeout=30)
+#        response.raise_for_status()  # Check if download was successful
+#        
+#        # Parse the ICS content
+#        cal = Calendar.from_ical(response.text)
 #        count = 0
-#        for event in cal.events:
-#            subject = event.name
-#            start = event.begin.datetime
-#            end = event.end.datetime
-#            day_of_week = start.weekday()
-#            start_time = start.strftime("%H:%M")
-#            end_time = end.strftime("%H:%M")
-#            add_schedule(user_id, subject, day_of_week, start_time, end_time)
-#            count += 1
-#        return count
-#    except Exception as e:
-#        logging.error(f"ICS parsing error: {e}")
-#        return 0
-
-#def parse_ics_and_save(user_id, ics_content):
-#    try:
-#        cal = Calendar.from_ical(ics_content)
-#        count = 0
+#        
 #        for component in cal.walk():
 #            if component.name == "VEVENT":
 #                subject = str(component.get('SUMMARY', 'No title'))
 #                dtstart = component.get('DTSTART')
 #                dtend = component.get('DTEND')
+#                
 #                if dtstart is None or dtend is None:
 #                    continue
+#                    
 #                start = dtstart.dt
 #                end = dtend.dt
+#                
 #                # Handle all-day events (date only)
 #                if not isinstance(start, datetime):
 #                    start = datetime.combine(start, datetime.min.time())
 #                if not isinstance(end, datetime):
 #                    end = datetime.combine(end, datetime.min.time())
+#                    
 #                day_of_week = start.weekday()
 #                start_time = start.strftime("%H:%M")
 #                end_time = end.strftime("%H:%M")
+#                
 #                add_schedule(user_id, subject, day_of_week, start_time, end_time)
 #                count += 1
+#                
 #        return count
+#    except requests.exceptions.RequestException as e:
+#        logging.error(f"Failed to download ICS from URL: {e}")
+#        return -1
 #    except Exception as e:
 #        logging.error(f"ICS parsing error: {e}")
-#        return 0 
-    
-    # Add this new function near your other ICS functions (around line 150)
-
-def parse_ics_from_url(user_id, ics_url):
-    """Download and parse ICS file from a URL"""
-    try:
-        # Download the ICS file
-        response = requests.get(ics_url, timeout=30)
-        response.raise_for_status()  # Check if download was successful
-        
-        # Parse the ICS content
-        cal = Calendar.from_ical(response.text)
-        count = 0
-        
-        for component in cal.walk():
-            if component.name == "VEVENT":
-                subject = str(component.get('SUMMARY', 'No title'))
-                dtstart = component.get('DTSTART')
-                dtend = component.get('DTEND')
-                
-                if dtstart is None or dtend is None:
-                    continue
-                    
-                start = dtstart.dt
-                end = dtend.dt
-                
-                # Handle all-day events (date only)
-                if not isinstance(start, datetime):
-                    start = datetime.combine(start, datetime.min.time())
-                if not isinstance(end, datetime):
-                    end = datetime.combine(end, datetime.min.time())
-                    
-                day_of_week = start.weekday()
-                start_time = start.strftime("%H:%M")
-                end_time = end.strftime("%H:%M")
-                
-                add_schedule(user_id, subject, day_of_week, start_time, end_time)
-                count += 1
-                
-        return count
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to download ICS from URL: {e}")
-        return -1
-    except Exception as e:
-        logging.error(f"ICS parsing error: {e}")
-        return 0
-
-# ==#======== KEYBOARDS ==========
-#def #get_main_keyboard():
-    #keyboard = VkKeyboard(one_time=False)
-    #keyboard.add_button("📅 Schedule", color=VkKeyboardColor.PRIMARY)
-    #keyboard.add_button("➕ Add class", color=VkKeyboardColor.POSITIVE)
-    #keyboard.add_line()
-    #keyboard.add_button("📝 My tasks", color=VkKeyboardColor.SECONDARY)
-    #keyboard.add_button("➕ Add deadline", color=VkKeyboardColor.POSITIVE)
-    #keyboard.add_line()
-    #keyboard.add_button("⚙️ Settings", color=VkKeyboardColor.SECONDARY)
-    #return keyboard.get_keyboard()
+#        return 0
 #
-
-def get_main_keyboard():
-    keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("📅 Schedule", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("➕ Add class", color=VkKeyboardColor.POSITIVE)
-    keyboard.add_line()
-    keyboard.add_button("📝 My tasks", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_button("➕ Add deadline", color=VkKeyboardColor.POSITIVE)
-    keyboard.add_line()
-    keyboard.add_button("⚙️ Settings", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_button("❓ Help", color=VkKeyboardColor.PRIMARY)  # New help button
-    return keyboard.get_keyboard()
-
-def get_deadline_keyboard(deadline_id):
-    keyboard = VkKeyboard(inline=True)
-    keyboard.add_button("✅ Done", color=VkKeyboardColor.POSITIVE, payload={"cmd": "mark_done", "did": deadline_id})
-    return keyboard.get_keyboard()
-
+## ==#======== KEYBOARDS ==========
+##def #get_main_keyboard():
+#    #keyboard = VkKeyboard(one_time=False)
+#    #keyboard.add_button("📅 Schedule", color=VkKeyboardColor.PRIMARY)
+#    #keyboard.add_button("➕ Add class", color=VkKeyboardColor.POSITIVE)
+#    #keyboard.add_line()
+#    #keyboard.add_button("📝 My tasks", color=VkKeyboardColor.SECONDARY)
+#    #keyboard.add_button("➕ Add deadline", color=VkKeyboardColor.POSITIVE)
+#    #keyboard.add_line()
+#    #keyboard.add_button("⚙️ Settings", color=VkKeyboardColor.SECONDARY)
+#    #return keyboard.get_keyboard()
+##
+#
+#def get_main_keyboard():
+#    keyboard = VkKeyboard(one_time=False)
+#    keyboard.add_button("📅 Schedule", color=VkKeyboardColor.PRIMARY)
+#    keyboard.add_button("➕ Add class", color=VkKeyboardColor.POSITIVE)
+#    keyboard.add_line()
+#    keyboard.add_button("📝 My tasks", color=VkKeyboardColor.SECONDARY)
+#    keyboard.add_button("➕ Add deadline", color=VkKeyboardColor.POSITIVE)
+#    keyboard.add_line()
+#    keyboard.add_button("⚙️ Settings", color=VkKeyboardColor.SECONDARY)
+#    keyboard.add_button("❓ Help", color=VkKeyboardColor.PRIMARY)  # New help button
+#    return keyboard.get_keyboard()
+#
+#def get_deadline_keyboard(deadline_id):
+#    keyboard = VkKeyboard(inline=True)
+#    keyboard.add_button("✅ Done", color=VkKeyboardColor.POSITIVE, payload={"cmd": "mark_done", "did": deadline_id})
+#    return keyboard.get_keyboard()
+#
+##def send_message(vk, user_id, text, keyboard=None):
+##    vk.method("messages.send", {
+##        "user_id": user_id,
+##        "message": text,
+##        "random_id": get_random_id(),
+##        "keyboard": keyboard if keyboard else VkKeyboard().get_empty_keyboard()
+##    })
+#
+##def send_message(vk, user_id, text, keyboard=None):
+##    vk.method("messages.send", {
+##        "user_id": user_id,
+##        "message": text,
+##        "random_id": get_random_id(),
+##        "keyboard": keyboard if keyboard else VkKeyboard().get_empty_keyboard()
+##    })
+#
+#
 #def send_message(vk, user_id, text, keyboard=None):
-#    vk.method("messages.send", {
-#        "user_id": user_id,
-#        "message": text,
-#        "random_id": get_random_id(),
-#        "keyboard": keyboard if keyboard else VkKeyboard().get_empty_keyboard()
-#    })
-
-#def send_message(vk, user_id, text, keyboard=None):
-#    vk.method("messages.send", {
-#        "user_id": user_id,
-#        "message": text,
-#        "random_id": get_random_id(),
-#        "keyboard": keyboard if keyboard else VkKeyboard().get_empty_keyboard()
-#    })
-
-
-def send_message(vk, user_id, text, keyboard=None):
-    try:
-        vk.messages.send(
-            user_id=user_id,
-            message=text,
-            random_id=get_random_id(),
-            keyboard=keyboard if keyboard else VkKeyboard().get_empty_keyboard()
-        )
-    except Exception as e:
-        logging.error(f"Error sending message to {user_id}: {e}")
-
-
-def handle_message(vk, user_id, text, attachments):
-    # Check for ICS URL command first
-    if text.startswith("/ics") or text.startswith("/import"):
-        parts = text.split(maxsplit=1)
-        if len(parts) == 2:
-            ics_url = parts[1].strip()
-            
-            # Basic URL validation
-            if ics_url.startswith(('http://', 'https://')):
-                send_message(vk, user_id, "⏳ Downloading and importing schedule from URL... Please wait.", get_main_keyboard())
-                count = parse_ics_from_url(user_id, ics_url)
-                
-                if count == -1:
-                    send_message(vk, user_id, "❌ Failed to download the ICS file. Check if the URL is correct and accessible.", get_main_keyboard())
-                elif count == 0:
-                    send_message(vk, user_id, "⚠️ No events found in the ICS file or failed to parse.", get_main_keyboard())
-                else:
-                    send_message(vk, user_id, f"✅ Successfully imported {count} events from the ICS URL!", get_main_keyboard())
-            else:
-                send_message(vk, user_id, "❌ Invalid URL. Please provide a valid HTTP or HTTPS link.", get_main_keyboard())
-        else:
-            send_message(vk, user_id, "📅 Usage: `/ics <URL>`\nExample: `/ics https://example.com/schedule.ics`\n\nYou can also upload an .ics file directly.", get_main_keyboard())
-        return
-    
-    # Regular text commands
-    if text == "📅 Schedule":
-        sched = get_schedule(user_id)
-        if not sched:
-            send_message(vk, user_id, "Your schedule is empty. Add classes via button, upload an .ics file, or use /ics <URL>", get_main_keyboard())
-        else:
-            msg = "📚 Your schedule:\n"
-            days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-            for subj, dow, start, end in sched:
-                msg += f"{days[dow]} {start}-{end} — {subj}\n"
-            send_message(vk, user_id, msg, get_main_keyboard())
-
-    elif text == "➕ Add class":
-        send_message(vk, user_id, "Send command:\n`/add <subject> <day(0=Mon..6=Sun)> <HH:MM> <HH:MM>`\nExample: /add Math 1 10:30 12:05", get_main_keyboard())
-
-    elif text == "📝 My tasks":
-        deadlines = get_deadlines(user_id, only_pending=True)
-        if not deadlines:
-            send_message(vk, user_id, "No active tasks.", get_main_keyboard())
-        else:
-            for did, task, due_date, remind_days in deadlines:
-                dt = datetime.strptime(due_date, "%Y-%m-%d %H:%M")
-                msg = f"📌 {task}\n⏰ Due: {dt.strftime('%d.%m.%Y %H:%M')}\n🔔 Remind {remind_days} day(s) before"
-                send_message(vk, user_id, msg, get_deadline_keyboard(did))
-
-    elif text == "➕ Add deadline":
-        send_message(vk, user_id, "Send command:\n`/deadline <task> <YYYY-MM-DD HH:MM> <remind_days>`\nExample: /deadline Physics report 2025-12-20 23:59 2", get_main_keyboard())
-
-    elif text == "⚙️ Settings":
-        offset = get_user_offset(user_id)
-        keyboard = VkKeyboard()
-        keyboard.add_button(f"⏰ Reminder offset: {offset} min", color=VkKeyboardColor.PRIMARY)
-        keyboard.add_line()
-        keyboard.add_button("🔙 Back", color=VkKeyboardColor.SECONDARY)
-        send_message(vk, user_id, "Notification settings:", keyboard.get_keyboard())
-
-    # Command handlers
-    elif text.startswith("/add"):
-        parts = text.split()
-        if len(parts) == 5:
-            _, subject, day_str, start_time, end_time = parts
-            if day_str.isdigit() and 0 <= int(day_str) <= 6:
-                add_schedule(user_id, subject, int(day_str), start_time, end_time)
-                send_message(vk, user_id, f"Class '{subject}' added!", get_main_keyboard())
-            else:
-                send_message(vk, user_id, "Day must be 0 (Mon) to 6 (Sun).", get_main_keyboard())
-        else:
-            send_message(vk, user_id, "Usage: /add <subject> <day> <start> <end>", get_main_keyboard())
-
-    elif text.startswith("/deadline"):
-        parts = text.split(maxsplit=3)
-        if len(parts) == 4:
-            _, task, due_date, remind_days = parts
-            if remind_days.isdigit():
-                add_deadline(user_id, task, due_date, int(remind_days))
-                send_message(vk, user_id, f"Task '{task}' saved!", get_main_keyboard())
-            else:
-                send_message(vk, user_id, "Remind days must be an integer.", get_main_keyboard())
-        else:
-            send_message(vk, user_id, "Usage: /deadline <task> <YYYY-MM-DD HH:MM> <days>", get_main_keyboard())
-    
-    elif text.startswith("/help"):
-        help_text = """📖 **Available Commands:**
-
-📅 **Schedule:**
-• /ics <URL> - Import timetable from ICS link
-• /add <subject> <day> <start> <end> - Add single class
-
-📝 **Tasks:**
-• /deadline <task> <date> <days> - Add deadline
-• Click "✅ Done" on tasks to complete them
-
-⚙️ **Settings:**
-• Use buttons below to navigate
-
-💡 **Tip:** You can also upload .ics files directly!"""
-        send_message(vk, user_id, help_text, get_main_keyboard())
-
-    else:
-        send_message(vk, user_id, "Unknown command. Use buttons, /ics <URL>, or /help", get_main_keyboard())
-
-
-# ========== MESSAGE HANDLING ==========
-def handle_message(vk, user_id, text, attachments):
-    if text == "📅 Schedule":
-        sched = get_schedule(user_id)
-        if not sched:
-            send_message(vk, user_id, "Your schedule is empty. Add classes via button or upload an .ics file.", get_main_keyboard())
-        else:
-            msg = "📚 Your schedule:\n"
-            days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-            for subj, dow, start, end in sched:
-                msg += f"{days[dow]} {start}-{end} — {subj}\n"
-            send_message(vk, user_id, msg, get_main_keyboard())
-
-    elif text == "➕ Add class":
-        send_message(vk, user_id, "Send command:\n`/add <subject> <day(0=Mon..6=Sun)> <HH:MM> <HH:MM>`\nExample: /add Math 1 10:30 12:05", get_main_keyboard())
-
-    elif text == "📝 My tasks":
-        deadlines = get_deadlines(user_id, only_pending=True)
-        if not deadlines:
-            send_message(vk, user_id, "No active tasks.", get_main_keyboard())
-        else:
-            for did, task, due_date, remind_days in deadlines:
-                dt = datetime.strptime(due_date, "%Y-%m-%d %H:%M")
-                msg = f"📌 {task}\n⏰ Due: {dt.strftime('%d.%m.%Y %H:%M')}\n🔔 Remind {remind_days} day(s) before"
-                send_message(vk, user_id, msg, get_deadline_keyboard(did))
-
-    elif text == "➕ Add deadline":
-        send_message(vk, user_id, "Send command:\n`/deadline <task> <YYYY-MM-DD HH:MM> <remind_days>`\nExample: /deadline Physics report 2025-12-20 23:59 2", get_main_keyboard())
-
-    elif text == "⚙️ Settings":
-        offset = get_user_offset(user_id)
-        keyboard = VkKeyboard()
-        keyboard.add_button(f"⏰ Reminder offset: {offset} min", color=VkKeyboardColor.PRIMARY)
-        keyboard.add_line()
-        keyboard.add_button("🔙 Back", color=VkKeyboardColor.SECONDARY)
-        send_message(vk, user_id, "Notification settings:", keyboard.get_keyboard())
-
-    # Command handlers
-    elif text.startswith("/add"):
-        parts = text.split()
-        if len(parts) == 5:
-            _, subject, day_str, start_time, end_time = parts
-            if day_str.isdigit() and 0 <= int(day_str) <= 6:
-                add_schedule(user_id, subject, int(day_str), start_time, end_time)
-                send_message(vk, user_id, f"Class '{subject}' added!", get_main_keyboard())
-            else:
-                send_message(vk, user_id, "Day must be 0 (Mon) to 6 (Sun).", get_main_keyboard())
-        else:
-            send_message(vk, user_id, "Usage: /add <subject> <day> <start> <end>", get_main_keyboard())
-
-    elif text.startswith("/deadline"):
-        parts = text.split(maxsplit=3)
-        if len(parts) == 4:
-            _, task, due_date, remind_days = parts
-            if remind_days.isdigit():
-                add_deadline(user_id, task, due_date, int(remind_days))
-                send_message(vk, user_id, f"Task '{task}' saved!", get_main_keyboard())
-            else:
-                send_message(vk, user_id, "Remind days must be an integer.", get_main_keyboard())
-        else:
-            send_message(vk, user_id, "Usage: /deadline <task> <YYYY-MM-DD HH:MM> <days>", get_main_keyboard())
-    else:
-        send_message(vk, user_id, "Unknown command. Use buttons or /add, /deadline.", get_main_keyboard())
-
-# ========== INLINE BUTTON HANDLING ==========
-def handle_payload(vk, user_id, payload):
-    if payload.get("cmd") == "mark_done":
-        did = payload["did"]
-        mark_deadline_done(did, user_id)
-        send_message(vk, user_id, "✅ Task marked as done!", get_main_keyboard())
-
-# ========== REMINDER SCHEDULER ==========
-def send_reminders(vk):
-    conn = sqlite3.connect("student_bot.db")
-    c = conn.cursor()
-    now = datetime.now(TIMEZONE)
-
-    # Class reminders (60 min before)
-    offset = 60
-    soon = now + timedelta(minutes=offset)
-    c.execute("""
-        SELECT s.user_id, s.subject, s.start_time, u.notify_offset
-        FROM schedule s
-        JOIN users u ON s.user_id = u.vk_id
-        WHERE s.day_of_week = ? AND s.start_time = ?
-    """, (now.weekday(), soon.strftime("%H:%M")))
-    rows = c.fetchall()
-    for user_id, subject, start_time, user_offset in rows:
-        if user_offset == offset:
-            send_message(vk, user_id, f"🔔 Reminder: Class '{subject}' starts at {start_time} (in {offset} minutes)", get_main_keyboard())
-
-    # Deadline reminders
-    c.execute("SELECT id, user_id, task, due_date, remind_days FROM deadlines WHERE done=0")
-    deadlines = c.fetchall()
-    for did, user_id, task, due_date, remind_days in deadlines:
-        due_dt = datetime.strptime(due_date, "%Y-%m-%d %H:%M")
-        due_dt = TIMEZONE.localize(due_dt) if due_dt.tzinfo is None else due_dt
-        delta = due_dt - now
-        if timedelta(days=remind_days) - timedelta(hours=1) < delta < timedelta(days=remind_days) + timedelta(hours=1):
-            send_message(vk, user_id, f"⚠️ Deadline '{task}' is in {remind_days} day(s) (due {due_dt.strftime('%d.%m.%Y %H:%M')})", get_main_keyboard())
-    conn.close()
-
-scheduler = BackgroundScheduler()
-def start_scheduler(vk):
-    scheduler.add_job(func=lambda: send_reminders(vk), trigger="interval", minutes=1)
-    scheduler.start()
-
-# ========== MAIN LOOP ==========
-def main():
-    vk_session = vk_api.VkApi(token=VK_TOKEN)
-    vk = vk_session.get_api()
-    longpoll = VkBotLongPoll(vk_session, GROUP_ID)
-
-    start_scheduler(vk)
-    logging.basicConfig(level=logging.INFO)
-
-    print("Bot started! Waiting for messages...")
-    for event in longpoll.listen():
-        if event.type == VkBotEventType.MESSAGE_NEW:
-            msg = event.object.message
-            user_id = msg["from_id"]
-            text = msg.get("text", "")
-            attachments = msg.get("attachments", [])
-
-            # ICS file upload handling
-            ics_attachments = [att for att in attachments if att["type"] == "doc" and att["doc"]["title"].endswith(".ics")]
-            if ics_attachments:
-                url = ics_attachments[0]["doc"]["url"]
-                resp = requests.get(url)
-                if resp.status_code == 200:
-                    count = parse_ics_from_url (user_id, resp.text)
-                    send_message(vk, user_id, f"Imported {count} events from .ics", get_main_keyboard())
-                else:
-                    send_message(vk, user_id, "Failed to download file", get_main_keyboard())
-                continue
-
-            # Inline button payload
-            payload = msg.get("payload")
-            if payload:
-                try:
-                    payload = json.loads(payload)
-                    handle_payload(vk, user_id, payload)
-                except:
-                    pass
-                continue
-
-            # Normal text message
-            handle_message(vk, user_id, text, attachments)
-
-if __name__ == "__main__":
- main()
-
-
+#    try:
+#        vk.messages.send(
+#            user_id=user_id,
+#            message=text,
+#            random_id=get_random_id(),
+#            keyboard=keyboard if keyboard else VkKeyboard().get_empty_keyboard()
+#        )
+#    except Exception as e:
+#        logging.error(f"Error sending message to {user_id}: {e}")
+#
+#
+#def handle_message(vk, user_id, text, attachments):
+#    # Check for ICS URL command first
+#    if text.startswith("/ics") or text.startswith("/import"):
+#        parts = text.split(maxsplit=1)
+#        if len(parts) == 2:
+#            ics_url = parts[1].strip()
+#            
+#            # Basic URL validation
+#            if ics_url.startswith(('http://', 'https://')):
+#                send_message(vk, user_id, "⏳ Downloading and importing schedule from URL... Please wait.", get_main_keyboard())
+#                count = parse_ics_from_url(user_id, ics_url)
+#                
+#                if count == -1:
+#                    send_message(vk, user_id, "❌ Failed to download the ICS file. Check if the URL is correct and accessible.", get_main_keyboard())
+#                elif count == 0:
+#                    send_message(vk, user_id, "⚠️ No events found in the ICS file or failed to parse.", get_main_keyboard())
+#                else:
+#                    send_message(vk, user_id, f"✅ Successfully imported {count} events from the ICS URL!", get_main_keyboard())
+#            else:
+#                send_message(vk, user_id, "❌ Invalid URL. Please provide a valid HTTP or HTTPS link.", get_main_keyboard())
+#        else:
+#            send_message(vk, user_id, "📅 Usage: `/ics <URL>`\nExample: `/ics https://example.com/schedule.ics`\n\nYou can also upload an .ics file directly.", get_main_keyboard())
+#        return
+#    
+#    # Regular text commands
+#    if text == "📅 Schedule":
+#        sched = get_schedule(user_id)
+#        if not sched:
+#            send_message(vk, user_id, "Your schedule is empty. Add classes via button, upload an .ics file, or use /ics <URL>", get_main_keyboard())
+#        else:
+#            msg = "📚 Your schedule:\n"
+#            days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+#            for subj, dow, start, end in sched:
+#                msg += f"{days[dow]} {start}-{end} — {subj}\n"
+#            send_message(vk, user_id, msg, get_main_keyboard())
+#
+#    elif text == "➕ Add class":
+#        send_message(vk, user_id, "Send command:\n`/add <subject> <day(0=Mon..6=Sun)> <HH:MM> <HH:MM>`\nExample: /add Math 1 10:30 12:05", get_main_keyboard())
+#
+#    elif text == "📝 My tasks":
+#        deadlines = get_deadlines(user_id, only_pending=True)
+#        if not deadlines:
+#            send_message(vk, user_id, "No active tasks.", get_main_keyboard())
+#        else:
+#            for did, task, due_date, remind_days in deadlines:
+#                dt = datetime.strptime(due_date, "%Y-%m-%d %H:%M")
+#                msg = f"📌 {task}\n⏰ Due: {dt.strftime('%d.%m.%Y %H:%M')}\n🔔 Remind {remind_days} day(s) before"
+#                send_message(vk, user_id, msg, get_deadline_keyboard(did))
+#
+#    elif text == "➕ Add deadline":
+#        send_message(vk, user_id, "Send command:\n`/deadline <task> <YYYY-MM-DD HH:MM> <remind_days>`\nExample: /deadline Physics report 2025-12-20 23:59 2", get_main_keyboard())
+#
+#    elif text == "⚙️ Settings":
+#        offset = get_user_offset(user_id)
+#        keyboard = VkKeyboard()
+#        keyboard.add_button(f"⏰ Reminder offset: {offset} min", color=VkKeyboardColor.PRIMARY)
+#        keyboard.add_line()
+#        keyboard.add_button("🔙 Back", color=VkKeyboardColor.SECONDARY)
+#        send_message(vk, user_id, "Notification settings:", keyboard.get_keyboard())
+#
+#    # Command handlers
+#    elif text.startswith("/add"):
+#        parts = text.split()
+#        if len(parts) == 5:
+#            _, subject, day_str, start_time, end_time = parts
+#            if day_str.isdigit() and 0 <= int(day_str) <= 6:
+#                add_schedule(user_id, subject, int(day_str), start_time, end_time)
+#                send_message(vk, user_id, f"Class '{subject}' added!", get_main_keyboard())
+#            else:
+#                send_message(vk, user_id, "Day must be 0 (Mon) to 6 (Sun).", get_main_keyboard())
+#        else:
+#            send_message(vk, user_id, "Usage: /add <subject> <day> <start> <end>", get_main_keyboard())
+#
+#    elif text.startswith("/deadline"):
+#        parts = text.split(maxsplit=3)
+#        if len(parts) == 4:
+#            _, task, due_date, remind_days = parts
+#            if remind_days.isdigit():
+#                add_deadline(user_id, task, due_date, int(remind_days))
+#                send_message(vk, user_id, f"Task '{task}' saved!", get_main_keyboard())
+#            else:
+#                send_message(vk, user_id, "Remind days must be an integer.", get_main_keyboard())
+#        else:
+#            send_message(vk, user_id, "Usage: /deadline <task> <YYYY-MM-DD HH:MM> <days>", get_main_keyboard())
+#    
+#    elif text.startswith("/help"):
+#        help_text = """📖 **Available Commands:**
+#
+#📅 **Schedule:**
+#• /ics <URL> - Import timetable from ICS link
+#• /add <subject> <day> <start> <end> - Add single class
+#
+#📝 **Tasks:**
+#• /deadline <task> <date> <days> - Add deadline
+#• Click "✅ Done" on tasks to complete them
+#
+#⚙️ **Settings:**
+#• Use buttons below to navigate
+#
+#💡 **Tip:** You can also upload .ics files directly!"""
+#        send_message(vk, user_id, help_text, get_main_keyboard())
+#
+#    else:
+#        send_message(vk, user_id, "Unknown command. Use buttons, /ics <URL>, or /help", get_main_keyboard())
+#
+#
+## ========== MESSAGE HANDLING ==========
+#def handle_message(vk, user_id, text, attachments):
+#    if text == "📅 Schedule":
+#        sched = get_schedule(user_id)
+#        if not sched:
+#            send_message(vk, user_id, "Your schedule is empty. Add classes via button or upload an .ics file.", get_main_keyboard())
+#        else:
+#            msg = "📚 Your schedule:\n"
+#            days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+#            for subj, dow, start, end in sched:
+#                msg += f"{days[dow]} {start}-{end} — {subj}\n"
+#            send_message(vk, user_id, msg, get_main_keyboard())
+#
+#    elif text == "➕ Add class":
+#        send_message(vk, user_id, "Send command:\n`/add <subject> <day(0=Mon..6=Sun)> <HH:MM> <HH:MM>`\nExample: /add Math 1 10:30 12:05", get_main_keyboard())
+#
+#    elif text == "📝 My tasks":
+#        deadlines = get_deadlines(user_id, only_pending=True)
+#        if not deadlines:
+#            send_message(vk, user_id, "No active tasks.", get_main_keyboard())
+#        else:
+#            for did, task, due_date, remind_days in deadlines:
+#                dt = datetime.strptime(due_date, "%Y-%m-%d %H:%M")
+#                msg = f"📌 {task}\n⏰ Due: {dt.strftime('%d.%m.%Y %H:%M')}\n🔔 Remind {remind_days} day(s) before"
+#                send_message(vk, user_id, msg, get_deadline_keyboard(did))
+#
+#    elif text == "➕ Add deadline":
+#        send_message(vk, user_id, "Send command:\n`/deadline <task> <YYYY-MM-DD HH:MM> <remind_days>`\nExample: /deadline Physics report 2025-12-20 23:59 2", get_main_keyboard())
+#
+#    elif text == "⚙️ Settings":
+#        offset = get_user_offset(user_id)
+#        keyboard = VkKeyboard()
+#        keyboard.add_button(f"⏰ Reminder offset: {offset} min", color=VkKeyboardColor.PRIMARY)
+#        keyboard.add_line()
+#        keyboard.add_button("🔙 Back", color=VkKeyboardColor.SECONDARY)
+#        send_message(vk, user_id, "Notification settings:", keyboard.get_keyboard())
+#
+#    # Command handlers
+#    elif text.startswith("/add"):
+#        parts = text.split()
+#        if len(parts) == 5:
+#            _, subject, day_str, start_time, end_time = parts
+#            if day_str.isdigit() and 0 <= int(day_str) <= 6:
+#                add_schedule(user_id, subject, int(day_str), start_time, end_time)
+#                send_message(vk, user_id, f"Class '{subject}' added!", get_main_keyboard())
+#            else:
+#                send_message(vk, user_id, "Day must be 0 (Mon) to 6 (Sun).", get_main_keyboard())
+#        else:
+#            send_message(vk, user_id, "Usage: /add <subject> <day> <start> <end>", get_main_keyboard())
+#
+#    elif text.startswith("/deadline"):
+#        parts = text.split(maxsplit=3)
+#        if len(parts) == 4:
+#            _, task, due_date, remind_days = parts
+#            if remind_days.isdigit():
+#                add_deadline(user_id, task, due_date, int(remind_days))
+#                send_message(vk, user_id, f"Task '{task}' saved!", get_main_keyboard())
+#            else:
+#                send_message(vk, user_id, "Remind days must be an integer.", get_main_keyboard())
+#        else:
+#            send_message(vk, user_id, "Usage: /deadline <task> <YYYY-MM-DD HH:MM> <days>", get_main_keyboard())
+#    else:
+#        send_message(vk, user_id, "Unknown command. Use buttons or /add, /deadline.", get_main_keyboard())
+#
+## ========== INLINE BUTTON HANDLING ==========
+#def handle_payload(vk, user_id, payload):
+#    if payload.get("cmd") == "mark_done":
+#        did = payload["did"]
+#        mark_deadline_done(did, user_id)
+#        send_message(vk, user_id, "✅ Task marked as done!", get_main_keyboard())
+#
+## ========== REMINDER SCHEDULER ==========
+#def send_reminders(vk):
+#    conn = sqlite3.connect("student_bot.db")
+#    c = conn.cursor()
+#    now = datetime.now(TIMEZONE)
+#
+#    # Class reminders (60 min before)
+#    offset = 60
+#    soon = now + timedelta(minutes=offset)
+#    c.execute("""
+#        SELECT s.user_id, s.subject, s.start_time, u.notify_offset
+#        FROM schedule s
+#        JOIN users u ON s.user_id = u.vk_id
+#        WHERE s.day_of_week = ? AND s.start_time = ?
+#    """, (now.weekday(), soon.strftime("%H:%M")))
+#    rows = c.fetchall()
+#    for user_id, subject, start_time, user_offset in rows:
+#        if user_offset == offset:
+#            send_message(vk, user_id, f"🔔 Reminder: Class '{subject}' starts at {start_time} (in {offset} minutes)", get_main_keyboard())
+#
+#    # Deadline reminders
+#    c.execute("SELECT id, user_id, task, due_date, remind_days FROM deadlines WHERE done=0")
+#    deadlines = c.fetchall()
+#    for did, user_id, task, due_date, remind_days in deadlines:
+#        due_dt = datetime.strptime(due_date, "%Y-%m-%d %H:%M")
+#        due_dt = TIMEZONE.localize(due_dt) if due_dt.tzinfo is None else due_dt
+#        delta = due_dt - now
+#        if timedelta(days=remind_days) - timedelta(hours=1) < delta < timedelta(days=remind_days) + timedelta(hours=1):
+#            send_message(vk, user_id, f"⚠️ Deadline '{task}' is in {remind_days} day(s) (due {due_dt.strftime('%d.%m.%Y %H:%M')})", get_main_keyboard())
+#    conn.close()
+#
+#scheduler = BackgroundScheduler()
+#def start_scheduler(vk):
+#    scheduler.add_job(func=lambda: send_reminders(vk), trigger="interval", minutes=1)
+#    scheduler.start()
+#
+## ========== MAIN LOOP ==========
+#def main():
+#    vk_session = vk_api.VkApi(token=VK_TOKEN)
+#    vk = vk_session.get_api()
+#    longpoll = VkBotLongPoll(vk_session, GROUP_ID)
+#
+#    start_scheduler(vk)
+#    logging.basicConfig(level=logging.INFO)
+#
+#    print("Bot started! Waiting for messages...")
+#    for event in longpoll.listen():
+#        if event.type == VkBotEventType.MESSAGE_NEW:
+#            msg = event.object.message
+#            user_id = msg["from_id"]
+#            text = msg.get("text", "")
+#            attachments = msg.get("attachments", [])
+#
+#            # ICS file upload handling
+#            ics_attachments = [att for att in attachments if att["type"] == "doc" and att["doc"]["title"].endswith(".ics")]
+#            if ics_attachments:
+#                url = ics_attachments[0]["doc"]["url"]
+#                resp = requests.get(url)
+#                if resp.status_code == 200:
+#                    count = parse_ics_from_url (user_id, resp.text)
+#                    send_message(vk, user_id, f"Imported {count} events from .ics", get_main_keyboard())
+#                else:
+#                    send_message(vk, user_id, "Failed to download file", get_main_keyboard())
+#                continue
+#
+#            # Inline button payload
+#            payload = msg.get("payload")
+#            if payload:
+#                try:
+#                    payload = json.loads(payload)
+#                    handle_payload(vk, user_id, payload)
+#                except:
+#                    pass
+#                continue
+#
+#            # Normal text message
+#            handle_message(vk, user_id, text, attachments)
+#
+#if __name__ == "__main__":
+# main()
 
 #import logging
 #import sqlite3
@@ -946,8 +944,9 @@ if __name__ == "__main__":
 #
 #if __name__ == "__main__":
 #    main()
-
-
+#
+#
+#    
 #import logging
 #import sqlite3
 #import json
@@ -6625,4 +6624,1123 @@ if __name__ == "__main__":
 #        
 #        longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 #        
-#        for event in longpoll.listen():#            if event.type == VkBotEventType.MESSAGE_NEW:#                try:#                    msg = event.object.message#                    user_id = msg["from_id"]#                    text = msg.get("text", "").strip()#                    attachments = msg.get("attachments", [])#                    #                    # Handle file uploads#                    ics_files = [att for att in attachments if att["type"] == "doc" and att["doc"]["title"].endswith(".ics")]#                    if ics_files:#                        url = ics_files[0]["doc"]["url"]#                        resp = requests.get(url)#                        if resp.status_code == 200:#                            count = import_ics_from_link(user_id, url)#                            lang = detect_language(text)#                            name = get_user_name(user_id) or "friend"#                            if count > 0:#                                send_message(vk, user_id, f"🎉 Success! I've imported {count} classes from your file, {name}!", get_main_keyboard(lang))#                            else:#                                send_message(vk, user_id, f"❌ Couldn't import from that file, {name}. Make sure it's a valid ICS file.", get_main_keyboard(lang))#                        continue#                    #                    # Handle button payloads#                    payload = msg.get("payload")#                    if payload:#                        try:#                            payload = json.loads(payload)#                            if payload.get("cmd") == "complete":#                                complete_task(payload["tid"], user_id)#                                lang = detect_language(text)#                                name = get_user_name(user_id) or "friend"#                                send_message(vk, user_id, f"🎉 Great job, {name}! Task completed!", get_main_keyboard(lang))#                        except:#                            pass#                        continue#                    #                    # Handle messages#                    if text:#                        handle_message(vk, user_id, text, attachments)#                        #                except Exception as e:#                    logging.error(f"Error: {e}")#                    #    except KeyboardInterrupt:#        print("\n🛑 Bot stopped")#        scheduler.shutdown()#    except Exception as e:#        print(f"\n❌ Error: {e}")##if __name__ == "__main__":#    main()#import logging#import sqlite3#import json#import requests#from datetime import datetime, timedelta#import vk_api#from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType#from vk_api.keyboard import VkKeyboard, VkKeyboardColor#from vk_api.utils import get_random_id#from icalendar import Calendar#from apscheduler.schedulers.background import BackgroundScheduler#import pytz#import re#import random### ========== CONFIGURATION ==========#VK_TOKEN = "vk1.a.eZvEbyVQo2aLD4K-r_7DxudJLQ4iNke42CLOnxo-ewzkJhDCjgY-FFImW2JeNulCAByv9bzkSuo_VXZFEV1GbMGoTfjD_TlDUV_pfIIfXU2eJvNsYIVFvVRa7OQxAhzGJPle69aDCxH7jYlu-LbbfSLM-9ZVDiOkmo3zSdgiWYegoSqKJqtGAGoyldsJYC79Fc9up1aNsvk3uJ3NZaE6Xg"#GROUP_ID = 237363984#TIMEZONE = pytz.timezone("Asia/Novosibirsk")##logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')### ========== DATABASE SETUP ==========#def init_db():#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    #    # Users table#    c.execute("""CREATE TABLE IF NOT EXISTS users (#        vk_id INTEGER PRIMARY KEY,#        name TEXT DEFAULT '',#        language TEXT DEFAULT 'en',#        reminder_offset INTEGER DEFAULT 75,#        join_date DATETIME DEFAULT CURRENT_TIMESTAMP#    )""")#    #    # Schedule table#    c.execute("""CREATE TABLE IF NOT EXISTS schedule (#        id INTEGER PRIMARY KEY AUTOINCREMENT,#        user_id INTEGER,#        subject TEXT,#        day INTEGER,#        start_time TEXT,#        end_time TEXT,#        location TEXT,#        teacher TEXT#    )""")#    #    # Class attendance tracking#    c.execute("""CREATE TABLE IF NOT EXISTS class_attendance (#        id INTEGER PRIMARY KEY AUTOINCREMENT,#        user_id INTEGER,#        class_id INTEGER,#        class_name TEXT,#        date DATE,#        attended INTEGER DEFAULT 0,#        missed INTEGER DEFAULT 0,#        notes TEXT DEFAULT ''#    )""")#    #    # Tasks table with all columns#    c.execute("""CREATE TABLE IF NOT EXISTS tasks (#        id INTEGER PRIMARY KEY AUTOINCREMENT,#        user_id INTEGER,#        task TEXT,#        due_date TEXT,#        remind_days INTEGER,#        priority TEXT DEFAULT 'normal',#        category TEXT DEFAULT 'general',#        done INTEGER DEFAULT 0,#        completed_date DATETIME#    )""")#    #    # Study sessions#    c.execute("""CREATE TABLE IF NOT EXISTS study_sessions (#        id INTEGER PRIMARY KEY AUTOINCREMENT,#        user_id INTEGER,#        subject TEXT,#        duration INTEGER,#        date TEXT,#        notes TEXT DEFAULT ''#    )""")#    #    # Daily statistics#    c.execute("""CREATE TABLE IF NOT EXISTS daily_stats (#        id INTEGER PRIMARY KEY AUTOINCREMENT,#        user_id INTEGER,#        date DATE,#        tasks_completed INTEGER DEFAULT 0,#        classes_attended INTEGER DEFAULT 0,#        study_minutes INTEGER DEFAULT 0,#        productivity_score INTEGER DEFAULT 0#    )""")#    #    # Reminders#    c.execute("""CREATE TABLE IF NOT EXISTS reminders (#        key TEXT PRIMARY KEY,#        sent INTEGER DEFAULT 1,#        reminder_time DATETIME DEFAULT CURRENT_TIMESTAMP#    )""")#    #    # Conversations#    c.execute("""CREATE TABLE IF NOT EXISTS conversations (#        id INTEGER PRIMARY KEY AUTOINCREMENT,#        user_id INTEGER,#        message TEXT,#        response TEXT,#        created_at DATETIME DEFAULT CURRENT_TIMESTAMP#    )""")#    #    conn.commit()#    #    # Fix existing tables - add missing columns if any#    try:#        # Check tasks table#        c.execute("PRAGMA table_info(tasks)")#        columns = [col[1] for col in c.fetchall()]#        #        if 'priority' not in columns:#            c.execute("ALTER TABLE tasks ADD COLUMN priority TEXT DEFAULT 'normal'")#        if 'category' not in columns:#            c.execute("ALTER TABLE tasks ADD COLUMN category TEXT DEFAULT 'general'")#        if 'completed_date' not in columns:#            c.execute("ALTER TABLE tasks ADD COLUMN completed_date DATETIME")#        #        # Check schedule table#        c.execute("PRAGMA table_info(schedule)")#        schedule_cols = [col[1] for col in c.fetchall()]#        if 'location' not in schedule_cols:#            c.execute("ALTER TABLE schedule ADD COLUMN location TEXT DEFAULT ''")#        if 'teacher' not in schedule_cols:#            c.execute("ALTER TABLE schedule ADD COLUMN teacher TEXT DEFAULT ''")#            #    except Exception as e:#        logging.warning(f"Schema update warning: {e}")#    #    conn.commit()#    conn.close()#    logging.info("Database initialized successfully")##init_db()### ========== HELPER FUNCTIONS ==========#def get_user_name(user_id):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("SELECT name FROM users WHERE vk_id = ?", (user_id,))#    row = c.fetchone()#    conn.close()#    return row[0] if row and row[0] else None##def set_user_name(user_id, name):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("INSERT OR REPLACE INTO users (vk_id, name) VALUES (?, ?)", (user_id, name))#    conn.commit()#    conn.close()##def detect_language(text):#    if not text:#        return 'en'#    cyrillic = sum(1 for c in text if '\u0400' <= c <= '\u04FF')#    if cyrillic > len(text) * 0.1:#        return 'ru'#    return 'en'### ========== ATTENDANCE TRACKING ==========#def mark_class_attended(user_id, class_name, date=None):#    if not date:#        date = datetime.now(TIMEZONE).strftime("%Y-%m-%d")#    #    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    #    c.execute("SELECT id FROM class_attendance WHERE user_id = ? AND class_name = ? AND date = ?", #              (user_id, class_name, date))#    existing = c.fetchone()#    #    if existing:#        c.execute("UPDATE class_attendance SET attended = 1, missed = 0 WHERE id = ?", (existing[0],))#    else:#        c.execute("INSERT INTO class_attendance (user_id, class_name, date, attended, missed) VALUES (?,?,?,1,0)",#                  (user_id, class_name, date))#    #    # Update daily stats#    c.execute("SELECT id FROM daily_stats WHERE user_id = ? AND date = ?", (user_id, date))#    daily = c.fetchone()#    if daily:#        c.execute("UPDATE daily_stats SET classes_attended = classes_attended + 1 WHERE id = ?", (daily[0],))#    else:#        c.execute("INSERT INTO daily_stats (user_id, date, classes_attended) VALUES (?,?,1)", (user_id, date))#    #    conn.commit()#    conn.close()#    return True### ========== SCHEDULE FUNCTIONS ==========#def add_class(user_id, subject, day, start, end, location='', teacher=''):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("""INSERT INTO schedule (user_id, subject, day, start_time, end_time, location, teacher) #                 VALUES (?,?,?,?,?,?,?)""",#              (user_id, subject, day, start, end, location, teacher))#    conn.commit()#    conn.close()#    logging.info(f"Added class: {subject} on day {day} at {start}")##def get_today_classes(user_id):#    today = datetime.now(TIMEZONE).weekday()#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("SELECT subject, start_time, end_time, location, teacher FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time", #              (user_id, today))#    rows = c.fetchall()#    conn.close()#    return rows##def get_tomorrow_classes(user_id):#    tomorrow = (datetime.now(TIMEZONE).weekday() + 1) % 7#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("SELECT subject, start_time, end_time, location, teacher FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time", #              (user_id, tomorrow))#    rows = c.fetchall()#    conn.close()#    return rows##def get_next_class(user_id):#    now = datetime.now(TIMEZONE)#    current_day = now.weekday()#    current_time = now.strftime("%H:%M")#    #    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("SELECT subject, day, start_time FROM schedule WHERE user_id = ? ORDER BY day, start_time", (user_id,))#    classes = c.fetchall()#    conn.close()#    #    for subject, day, start in classes:#        if day > current_day or (day == current_day and start > current_time):#            return subject, start#    if classes:#        return classes[0][0], classes[0][2]#    return None, None##def get_class_count(user_id):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("SELECT COUNT(*) FROM schedule WHERE user_id = ?", (user_id,))#    count = c.fetchone()[0]#    conn.close()#    return count### ========== TASK FUNCTIONS ==========#def add_task(user_id, task, due_date, remind_days, priority='normal', category='general'):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("INSERT INTO tasks (user_id, task, due_date, remind_days, priority, category, done) VALUES (?,?,?,?,?,?,0)",#              (user_id, task, due_date, remind_days, priority, category))#    conn.commit()#    conn.close()#    logging.info(f"Added task for user {user_id}: {task}")##def get_tasks(user_id):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("SELECT id, task, due_date, remind_days, priority, category FROM tasks WHERE user_id = ? AND done = 0 ORDER BY due_date", (user_id,))#    rows = c.fetchall()#    conn.close()#    return rows##def complete_task(task_id, user_id):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    completed_date = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")#    c.execute("UPDATE tasks SET done = 1, completed_date = ? WHERE id = ? AND user_id = ?", #              (completed_date, task_id, user_id))#    conn.commit()#    #    # Update daily stats#    today = datetime.now(TIMEZONE).strftime("%Y-%m-%d")#    c.execute("SELECT id FROM daily_stats WHERE user_id = ? AND date = ?", (user_id, today))#    daily = c.fetchone()#    if daily:#        c.execute("UPDATE daily_stats SET tasks_completed = tasks_completed + 1 WHERE id = ?", (daily[0],))#    else:#        c.execute("INSERT INTO daily_stats (user_id, date, tasks_completed) VALUES (?,?,1)", (user_id, today))#    #    conn.commit()#    conn.close()#    logging.info(f"Task {task_id} completed by user {user_id}")##def get_task_stats(user_id):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND done = 0", (user_id,))#    pending = c.fetchone()[0]#    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND done = 1", (user_id,))#    completed = c.fetchone()[0]#    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND done = 1 AND priority = 'high'", (user_id,))#    high_completed = c.fetchone()[0]#    conn.close()#    return pending, completed, high_completed### ========== STUDY FUNCTIONS ==========#def add_study_session(user_id, subject, duration):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    today = datetime.now(TIMEZONE).strftime("%Y-%m-%d")#    c.execute("INSERT INTO study_sessions (user_id, subject, duration, date) VALUES (?,?,?,?)",#              (user_id, subject, duration, today))#    #    # Update daily stats#    c.execute("SELECT id FROM daily_stats WHERE user_id = ? AND date = ?", (user_id, today))#    daily = c.fetchone()#    if daily:#        c.execute("UPDATE daily_stats SET study_minutes = study_minutes + ? WHERE id = ?", (duration, daily[0]))#    else:#        c.execute("INSERT INTO daily_stats (user_id, date, study_minutes) VALUES (?,?,?)", (user_id, today, duration))#    #    conn.commit()#    conn.close()##def get_today_study_time(user_id):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    today = datetime.now(TIMEZONE).strftime("%Y-%m-%d")#    c.execute("SELECT SUM(duration) FROM study_sessions WHERE user_id = ? AND date = ?", (user_id, today))#    total = c.fetchone()[0]#    conn.close()#    return total or 0##def get_weekly_study_time(user_id):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    week_ago = (datetime.now(TIMEZONE) - timedelta(days=7)).strftime("%Y-%m-%d")#    c.execute("SELECT SUM(duration) FROM study_sessions WHERE user_id = ? AND date >= ?", (user_id, week_ago))#    total = c.fetchone()[0]#    conn.close()#    return total or 0### ========== COMPREHENSIVE STATISTICS ==========#def get_comprehensive_stats(user_id):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    #    # Task statistics#    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND done = 0", (user_id,))#    pending_tasks = c.fetchone()[0]#    #    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND done = 1", (user_id,))#    completed_tasks = c.fetchone()[0]#    #    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND done = 1 AND priority = 'high'", (user_id,))#    high_priority_completed = c.fetchone()[0]#    #    # Study statistics#    c.execute("SELECT SUM(duration) FROM study_sessions WHERE user_id = ?", (user_id,))#    total_study_minutes = c.fetchone()[0] or 0#    #    c.execute("SELECT SUM(duration) FROM study_sessions WHERE user_id = ? AND date >= date('now', '-7 days')", (user_id,))#    weekly_study = c.fetchone()[0] or 0#    #    c.execute("SELECT SUM(duration) FROM study_sessions WHERE user_id = ? AND date = date('now')", (user_id,))#    today_study = c.fetchone()[0] or 0#    #    # Class statistics#    c.execute("SELECT COUNT(*) FROM schedule WHERE user_id = ?", (user_id,))#    total_classes = c.fetchone()[0]#    #    c.execute("SELECT COUNT(*) FROM class_attendance WHERE user_id = ? AND attended = 1", (user_id,))#    classes_attended = c.fetchone()[0]#    #    c.execute("SELECT COUNT(*) FROM class_attendance WHERE user_id = ? AND missed = 1", (user_id,))#    classes_missed = c.fetchone()[0]#    #    # Calculate attendance rate#    attendance_rate = 0#    if classes_attended + classes_missed > 0:#        attendance_rate = round((classes_attended / (classes_attended + classes_missed)) * 100, 1)#    #    # Daily stats for last 7 days#    c.execute("""SELECT date, tasks_completed, classes_attended, study_minutes #                 FROM daily_stats WHERE user_id = ? AND date >= date('now', '-7 days') #                 ORDER BY date DESC""", (user_id,))#    daily_stats = c.fetchall()#    #    # Calculate productivity score#    productivity_score = 0#    if completed_tasks + pending_tasks > 0:#        productivity_score = int((completed_tasks / (completed_tasks + pending_tasks)) * 100)#    #    # Weekly trend#    c.execute("""SELECT #        SUM(tasks_completed) as weekly_tasks,#        SUM(classes_attended) as weekly_classes,#        SUM(study_minutes) as weekly_study#        FROM daily_stats WHERE user_id = ? AND date >= date('now', '-7 days')""", (user_id,))#    weekly_summary = c.fetchone()#    #    conn.close()#    #    return {#        'pending_tasks': pending_tasks,#        'completed_tasks': completed_tasks,#        'high_priority_completed': high_priority_completed,#        'total_study_minutes': total_study_minutes,#        'weekly_study': weekly_study,#        'today_study': today_study,#        'total_classes': total_classes,#        'classes_attended': classes_attended,#        'classes_missed': classes_missed,#        'attendance_rate': attendance_rate,#        'productivity_score': productivity_score,#        'daily_stats': daily_stats,#        'weekly_summary': weekly_summary#    }### ========== ICS IMPORT ==========#def import_ics_from_link(user_id, url):#    try:#        logging.info(f"Importing ICS from URL: {url}")#        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}#        response = requests.get(url, timeout=30, headers=headers)#        response.raise_for_status()#        #        cal = Calendar.from_ical(response.text)#        count = 0#        #        for component in cal.walk():#            if component.name == "VEVENT":#                subject = str(component.get('SUMMARY', 'Class'))#                dtstart = component.get('DTSTART')#                dtend = component.get('DTEND')#                #                if dtstart and dtend:#                    start = dtstart.dt#                    end = dtend.dt#                    #                    if not isinstance(start, datetime):#                        start = datetime.combine(start, datetime.min.time())#                    if not isinstance(end, datetime):#                        end = datetime.combine(end, datetime.min.time())#                    #                    location = str(component.get('LOCATION', ''))#                    day_of_week = start.weekday()#                    start_time = start.strftime("%H:%M")#                    end_time = end.strftime("%H:%M")#                    #                    add_class(user_id, subject, day_of_week, start_time, end_time, location, '')#                    count += 1#        #        return count#    except Exception as e:#        logging.error(f"ICS import error: {e}")#        return -1### ========== BOT FUNCTIONS ==========#def send_message(vk, user_id, text, keyboard=None):#    try:#        if not keyboard:#            keyboard = VkKeyboard().get_empty_keyboard()#        vk.messages.send(user_id=user_id, message=text, random_id=get_random_id(), keyboard=keyboard)#    except Exception as e:#        logging.error(f"Send error: {e}")##def get_main_keyboard(lang='en'):#    keyboard = VkKeyboard(one_time=False)#    if lang == 'ru':#        keyboard.add_button("📅 Что сегодня?", color=VkKeyboardColor.PRIMARY)#        keyboard.add_button("📅 Что завтра?", color=VkKeyboardColor.PRIMARY)#        keyboard.add_line()#        keyboard.add_button("⏰ Что дальше?", color=VkKeyboardColor.SECONDARY)#        keyboard.add_button("📝 Мои задачи", color=VkKeyboardColor.SECONDARY)#        keyboard.add_line()#        keyboard.add_button("📊 Статистика", color=VkKeyboardColor.POSITIVE)#        keyboard.add_button("📥 Импорт", color=VkKeyboardColor.POSITIVE)#        keyboard.add_line()#        keyboard.add_button("✅ Отметить пару", color=VkKeyboardColor.PRIMARY)#        keyboard.add_button("❓ Помощь", color=VkKeyboardColor.PRIMARY)#    else:#        keyboard.add_button("📅 What's today?", color=VkKeyboardColor.PRIMARY)#        keyboard.add_button("📅 What's tomorrow?", color=VkKeyboardColor.PRIMARY)#        keyboard.add_line()#        keyboard.add_button("⏰ What's next?", color=VkKeyboardColor.SECONDARY)#        keyboard.add_button("📝 My tasks", color=VkKeyboardColor.SECONDARY)#        keyboard.add_line()#        keyboard.add_button("📊 Statistics", color=VkKeyboardColor.POSITIVE)#        keyboard.add_button("📥 Import", color=VkKeyboardColor.POSITIVE)#        keyboard.add_line()#        keyboard.add_button("✅ Mark attended", color=VkKeyboardColor.PRIMARY)#        keyboard.add_button("❓ Help", color=VkKeyboardColor.PRIMARY)#    return keyboard.get_keyboard()### ========== MESSAGE HANDLER ==========#def handle_message(vk, user_id, text, attachments):#    lang = detect_language(text)#    name = get_user_name(user_id)#    #    # First time user#    if not name and not any(word in text.lower() for word in ['my name is', 'call me', 'меня зовут', 'зовут']):#        send_message(vk, user_id, "Hey there! 👋 I'm your personal assistant. What's your name?", get_main_keyboard(lang))#        return#    #    # Extract name#    name_match = re.search(r'(?:my name is|call me|меня зовут|зовут)\s+([A-Za-zА-Яа-я]+)', text, re.IGNORECASE)#    if name_match and not name:#        name = name_match.group(1).capitalize()#        set_user_name(user_id, name)#        send_message(vk, user_id, f"Nice to meet you, {name}! 👋 I'm here to help with your schedule, tasks, and tracking your progress!", get_main_keyboard(lang))#        return#    #    # Mark class attended#    if text in ["✅ Mark attended", "✅ Отметить пару"] or "attended" in text.lower() or "посетил" in text.lower():#        classes = get_today_classes(user_id)#        if classes:#            class_list = "\n".join([f"{i+1}. {subj}" for i, (subj, _, _, _, _) in enumerate(classes)])#            send_message(vk, user_id, f"📚 Which class did you attend, {name}?\n\n{class_list}\n\nReply with the number or name of the class.", get_main_keyboard(lang))#        else:#            send_message(vk, user_id, f"You have no classes today, {name}! 📭", get_main_keyboard(lang))#        return#    #    # Check for ICS link#    if '.ics' in text and ('http://' in text or 'https://' in text):#        url_match = re.search(r'(https?://[^\s]+\.ics)', text)#        if url_match:#            send_message(vk, user_id, "⏳ Importing your schedule... Please wait.", get_main_keyboard(lang))#            count = import_ics_from_link(user_id, url_match.group(1))#            if count > 0:#                send_message(vk, user_id, f"🎉 Success! I've imported {count} classes into your schedule, {name}!\n\n✅ I'll remind you before each class.\n📅 Ask 'What's today?' to see your schedule!\n📊 Check 'Statistics' to track your progress!", get_main_keyboard(lang))#            else:#                send_message(vk, user_id, f"❌ Couldn't import from that link, {name}. Make sure it's a valid ICS file.", get_main_keyboard(lang))#        return#    #    # /ics command#    if text.startswith('/ics'):#        parts = text.split(maxsplit=1)#        if len(parts) == 2:#            ics_url = parts[1].strip()#            if ics_url.startswith(('http://', 'https://')):#                send_message(vk, user_id, "⏳ Importing your schedule... Please wait.", get_main_keyboard(lang))#                count = import_ics_from_link(user_id, ics_url)#                if count > 0:#                    send_message(vk, user_id, f"🎉 Success! I've imported {count} classes into your schedule, {name}!", get_main_keyboard(lang))#                else:#                    send_message(vk, user_id, f"❌ Couldn't import from that link, {name}. Please check the URL.", get_main_keyboard(lang))#            else:#                send_message(vk, user_id, "❌ Please provide a valid HTTP or HTTPS link.", get_main_keyboard(lang))#        else:#            send_message(vk, user_id, f"📥 To import your schedule, {name}, send me an ICS link like this: /ics https://example.com/schedule.ics", get_main_keyboard(lang))#        return#    #    # Import instructions#    if text in ["📥 Import", "📥 Импорт"] or "how to import" in text.lower():#        msg = f"📥 **How to Import Your Schedule, {name}:**\n\n1️⃣ Send me an ICS link (like from your university portal)\n2️⃣ Use command: /ics [your-link]\n3️⃣ Attach an .ics file\n\nI'll automatically add all your classes and remind you before each one! ⏰"#        send_message(vk, user_id, msg, get_main_keyboard(lang))#        return#    #    # /task command#    if text.startswith('/task'):#        parts = text.split(maxsplit=4)#        if len(parts) >= 4:#            _, task, due_date, days = parts[0], parts[1], parts[2], parts[3]#            priority = parts[4] if len(parts) > 4 else 'normal'#            if days.isdigit():#                add_task(user_id, task, due_date, int(days), priority)#                send_message(vk, user_id, f"✅ Got it, {name}! I've added '{task}' to your list. I'll remind you {days} day(s) before.", get_main_keyboard(lang))#            else:#                send_message(vk, user_id, "Format: /task 'Task name' 2025-12-20 23:59 7 [priority]", get_main_keyboard(lang))#        else:#            send_message(vk, user_id, "Format: /task 'Task name' YYYY-MM-DD HH:MM days [priority]", get_main_keyboard(lang))#        return#    #    # Statistics#    if text in ["📊 Statistics", "📊 Статистика"] or "statistics" in text.lower() or "stats" in text.lower() or "статистика" in text.lower():#        stats = get_comprehensive_stats(user_id)#        #        # Create progress bar for productivity#        productivity_bar = "█" * (stats['productivity_score'] // 10) + "░" * (10 - (stats['productivity_score'] // 10))#        #        # Create attendance bar#        attendance_bar = "█" * int(stats['attendance_rate'] / 10) + "░" * (10 - int(stats['attendance_rate'] / 10))#        #        msg = f"""📊 **YOUR STUDY STATISTICS, {name.upper()}!** 📊##━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━##📝 **TASK MASTERY**#• ✅ Completed Tasks: {stats['completed_tasks']}#• ⏳ Pending Tasks: {stats['pending_tasks']}#• 🔴 High Priority Done: {stats['high_priority_completed']}#• 🎯 Productivity Score: {stats['productivity_score']}%#   [{productivity_bar}]##━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━##📚 **CLASS ATTENDANCE**#• 📖 Total Classes: {stats['total_classes']}#• ✅ Attended: {stats['classes_attended']}#• ❌ Missed: {stats['classes_missed']}#• 📈 Attendance Rate: {stats['attendance_rate']}%#   [{attendance_bar}]##━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━##⏱️ **STUDY TIME**#• 📅 Today: {stats['today_study']} minutes#• 📆 This Week: {stats['weekly_study']} minutes#• 🏆 Total: {stats['total_study_minutes']} minutes#• 💪 Avg Daily: {stats['weekly_study'] // 7 if stats['weekly_study'] > 0 else 0} min/day##━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━##💡 **MOTIVATION**#{random.choice([#    "You're doing amazing! Keep pushing forward! 💪",#    "Every step counts! Progress over perfection! 🌟",#    "Your dedication is inspiring! 🎯",#    "Small daily improvements lead to big results! 📈",#    "You've got this! Keep up the great work! 🚀"#])}##📌 *Track your attendance by clicking '✅ Mark attended' after each class!*"""#        #        send_message(vk, user_id, msg, get_main_keyboard(lang))#        return#    #    text_lower = text.lower()#    #    # Today's schedule#    if any(word in text_lower for word in ['today', 'сегодня', "what's today", 'что сегодня']):#        classes = get_today_classes(user_id)#        if classes:#            days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]#            if lang == 'ru':#                days = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]#            class_list = ""#            for subj, start, end, loc, teacher in classes:#                class_list += f"⏰ {start}-{end} • **{subj}**\n"#                if loc:#                    class_list += f"   📍 {loc}\n"#                class_list += "\n"#            send_message(vk, user_id, f"📅 **Today's Schedule, {name}:**\n\n{class_list}💡 After each class, click '✅ Mark attended' to track your attendance!", get_main_keyboard(lang))#        else:#            send_message(vk, user_id, f"🎉 You have no classes today, {name}! Free day!", get_main_keyboard(lang))#        return#    #    # Tomorrow's schedule#    if any(word in text_lower for word in ['tomorrow', 'завтра', "what's tomorrow", 'что завтра']):#        classes = get_tomorrow_classes(user_id)#        if classes:#            class_list = ""#            for subj, start, end, loc, teacher in classes:#                class_list += f"⏰ {start}-{end} • **{subj}**\n"#                if loc:#                    class_list += f"   📍 {loc}\n"#                class_list += "\n"#            send_message(vk, user_id, f"📅 **Tomorrow's Schedule, {name}:**\n\n{class_list}", get_main_keyboard(lang))#        else:#            send_message(vk, user_id, f"🎉 No classes tomorrow, {name}! Enjoy your day off!", get_main_keyboard(lang))#        return#    #    # Next class#    if any(word in text_lower for word in ['next', "what's next", 'дальше', 'следующая']):#        subject, time = get_next_class(user_id)#        if subject:#            now = datetime.now(TIMEZONE)#            hour, minute = map(int, time.split(':'))#            class_time = now.replace(hour=hour, minute=minute, second=0)#            minutes = int((class_time - now).total_seconds() / 60)#            if minutes > 0:#                send_message(vk, user_id, f"⏰ {name}, your next class is **{subject}** at {time}. That's in about {minutes} minutes!", get_main_keyboard(lang))#            else:#                send_message(vk, user_id, f"⏰ {name}, your next class is **{subject}** at {time}. Better get ready! 📚", get_main_keyboard(lang))#        else:#            send_message(vk, user_id, f"🎉 You're all done with classes for today, {name}! Time to relax!", get_main_keyboard(lang))#        return#    #    # My tasks#    if any(word in text_lower for word in ['tasks', 'task', 'deadlines', 'задачи', 'дела']):#        tasks = get_tasks(user_id)#        if tasks:#            task_list = ""#            for tid, task, due_date, days, priority, category in tasks:#                dt = datetime.strptime(due_date, "%Y-%m-%d %H:%M")#                priority_icon = "🔴" if priority == 'high' else "🟡" if priority == 'medium' else "🟢"#                task_list += f"{priority_icon} **{task}**\n   ⏰ {dt.strftime('%d.%m.%Y %H:%M')}\n   📂 {category}\n\n"#            send_message(vk, user_id, f"📋 **Your Tasks, {name}:**\n\n{task_list}💡 Say 'Done [task]' when you complete something!\n📊 Check 'Statistics' to see your progress!", get_main_keyboard(lang))#        else:#            send_message(vk, user_id, f"✅ Great job, {name}! You have no pending tasks. All caught up! 🎉", get_main_keyboard(lang))#        return#    #    # Complete task#    done_match = re.search(r'(?:done|finished|complete|готово|сделал|выполнил)\s+(.+?)(?:\.|$)', text, re.IGNORECASE)#    if done_match:#        task_name = done_match.group(1).strip()#        tasks = get_tasks(user_id)#        for tid, task, due_date, days, priority, category in tasks:#            if task_name.lower() in task.lower() or task.lower() in task_name.lower():#                complete_task(tid, user_id)#                send_message(vk, user_id, f"🎉 Awesome work, {name}! I've marked '{task}' as complete!\n\n📊 Check 'Statistics' to see your updated progress!", get_main_keyboard(lang))#                return#        send_message(vk, user_id, f"Hmm, I couldn't find a task named '{task_name}', {name}. Can you check the name?", get_main_keyboard(lang))#        return#    #    # Study logging#    study_match = re.search(r'(?:study|studied|учился|занимался)\s+(\d+)\s+(?:minutes?|min|минут?)\s+(?:for\s+)?(.+?)(?:\.|$)', text, re.IGNORECASE)#    if study_match:#        duration = int(study_match.group(1))#        subject = study_match.group(2).strip()#        add_study_session(user_id, subject, duration)#        total = get_today_study_time(user_id)#        send_message(vk, user_id, f"📝 Great job, {name}! I've logged {duration} minutes of studying for {subject}. Total today: {total} minutes!\n\n📊 Check 'Statistics' to see your progress! 💪", get_main_keyboard(lang))#        return#    #    # Help#    if any(word in text_lower for word in ['help', 'помощь', 'what can you do']):#        help_text = f"""🤖 **What I Can Do For You, {name}:**##📅 **SCHEDULE**#• "What's today?" - Today's classes#• "What's tomorrow?" - Tomorrow's classes#• "What's next?" - Next class#• Send ICS link - Import your timetable##✅ **ATTENDANCE**#• "Mark attended" - Track classes you attended##📝 **TASKS**#• "My tasks" - See all tasks#• /task "Task" 2025-12-20 23:59 7 [priority]#• "Done [task]" - Mark complete##📊 **STATISTICS**#• "Statistics" - Complete progress report##📥 **IMPORT SCHEDULE**#• Just send me an ICS link#• Use /ics [your-link]##⏰ **REMINDERS**#• Automatic 60-90 min before class##🎯 **PRO TIP:** Track your attendance and tasks to see your productivity score!##What would you like help with? 😊"""#        send_message(vk, user_id, help_text, get_main_keyboard(lang))#        return#    #    # Thanks#    if any(word in text_lower for word in ['thanks', 'thank you', 'спасибо']):#        send_message(vk, user_id, f"You're welcome, {name}! 😊 Anything else I can help with? Check 'Statistics' to see your progress!", get_main_keyboard(lang))#        return#    #    # Time#    if any(word in text_lower for word in ['time', 'время', 'который час']):#        now = datetime.now(TIMEZONE)#        send_message(vk, user_id, f"🕐 It's {now.strftime('%H:%M')}, {name}. What's on your schedule?", get_main_keyboard(lang))#        return#    #    # Joke#    if any(word in text_lower for word in ['joke', 'шутка']):#        jokes = [#            "Why don't scientists trust atoms? They make up everything!",#            "What do you call a fake noodle? An impasta!",#            "Why did the scarecrow win an award? He was outstanding in his field!"#        ]#        send_message(vk, user_id, f"😂 Here's a joke for you, {name}: {random.choice(jokes)}", get_main_keyboard(lang))#        return#    #    # Greeting#    if any(word in text_lower for word in ['hello', 'hi', 'hey', 'привет']):#        send_message(vk, user_id, f"Hey {name}! 👋 Good to see you! Check 'Statistics' to see your progress! 🎉", get_main_keyboard(lang))#        return#    #    # Default response#    responses = [#        f"That's interesting, {name}! How can I help you with that? Try 'Statistics' to see your progress!",#        f"I see! Would you like me to check your schedule, add a task, or show your statistics?",#        f"Thanks for sharing, {name}! Is there something specific you'd like help with?"#    ]#    send_message(vk, user_id, random.choice(responses), get_main_keyboard(lang))### ========== REMINDER SYSTEM ==========#def check_reminders(vk):#    try:#        conn = sqlite3.connect("assistant.db")#        c = conn.cursor()#        now = datetime.now(TIMEZONE)#        current_day = now.weekday()#        #        c.execute("SELECT DISTINCT user_id FROM schedule")#        users = c.fetchall()#        #        for (user_id,) in users:#            name = get_user_name(user_id) or "friend"#            lang = detect_language("")#            #            c.execute("SELECT subject, start_time FROM schedule WHERE user_id = ? AND day = ?", (user_id, current_day))#            classes = c.fetchall()#            #            for subject, start_time in classes:#                hour, minute = map(int, start_time.split(':'))#                class_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)#                minutes_until = (class_time - now).total_seconds() / 60#                #                if 60 <= minutes_until <= 90:#                    key = f"reminder_{user_id}_{current_day}_{start_time}"#                    c.execute("SELECT sent FROM reminders WHERE key = ?", (key,))#                    if not c.fetchone():#                        msg = f"⏰ **Reminder, {name}!**\n\n📚 {subject}\n🕐 {start_time}\n\nIn {int(minutes_until)} minutes! Get ready! 📖\n\n✅ Don't forget to mark attendance after class!"#                        send_message(vk, user_id, msg, get_main_keyboard(lang))#                        c.execute("INSERT INTO reminders (key, sent) VALUES (?, ?)", (key, 1))#                        conn.commit()#        #        conn.close()#    except Exception as e:#        logging.error(f"Reminder error: {e}")### ========== MAIN ==========#scheduler = BackgroundScheduler()##def main():#    print("=" * 60)#    print("🤖 Personal Assistant Bot - Fully Fixed")#    print("=" * 60)#    print("✅ Database schema fixed")#    print("✅ All columns added")#    print("✅ Bot starting...")#    #    try:#        vk_session = vk_api.VkApi(token=VK_TOKEN)#        vk = vk_session.get_api()#        #        scheduler.add_job(lambda: check_reminders(vk), 'interval', minutes=5)#        scheduler.start()#        #        print("✅ Bot is running!")#        print("💬 Listening for messages...\n")#        #        longpoll = VkBotLongPoll(vk_session, GROUP_ID)#        #        for event in longpoll.listen():#            if event.type == VkBotEventType.MESSAGE_NEW:#                try:#                    msg = event.object.message#                    user_id = msg["from_id"]#                    text = msg.get("text", "").strip()#                    attachments = msg.get("attachments", [])#                    #                    # Handle file uploads#                    ics_files = [att for att in attachments if att["type"] == "doc" and att["doc"]["title"].endswith(".ics")]#                    if ics_files:#                        url = ics_files[0]["doc"]["url"]#                        resp = requests.get(url)#                        if resp.status_code == 200:#                            count = import_ics_from_link(user_id, url)#                            lang = detect_language(text)#                            name = get_user_name(user_id) or "friend"#                            if count > 0:#                                send_message(vk, user_id, f"🎉 Success! I've imported {count} classes from your file, {name}!", get_main_keyboard(lang))#                            else:#                                send_message(vk, user_id, f"❌ Couldn't import from that file, {name}. Make sure it's a valid ICS file.", get_main_keyboard(lang))#                        continue#                    #                    # Handle button payloads#                    payload = msg.get("payload")#                    if payload:#                        try:#                            payload = json.loads(payload)#                            if payload.get("cmd") == "complete":#                                complete_task(payload["tid"], user_id)#                                lang = detect_language(text)#                                name = get_user_name(user_id) or "friend"#                                send_message(vk, user_id, f"🎉 Great job, {name}! Task completed!", get_main_keyboard(lang))#                        except:#                            pass#                        continue#                    #                    # Handle messages#                    if text:#                        handle_message(vk, user_id, text, attachments)#                        #                except Exception as e:#                    logging.error(f"Error: {e}")#                    #    except KeyboardInterrupt:#        print("\n🛑 Bot stopped")#        scheduler.shutdown()#    except Exception as e:#        print(f"\n❌ Error: {e}")##if __name__ == "__main__":#    main()#import logging#import sqlite3#import json#import requests#from datetime import datetime, timedelta#import vk_api#from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType#from vk_api.keyboard import VkKeyboard, VkKeyboardColor#from vk_api.utils import get_random_id#from icalendar import Calendar#from apscheduler.schedulers.background import BackgroundScheduler#import pytz#import re#import random### ========== CONFIGURATION ==========#VK_TOKEN = "vk1.a.eZvEbyVQo2aLD4K-r_7DxudJLQ4iNke42CLOnxo-ewzkJhDCjgY-FFImW2JeNulCAByv9bzkSuo_VXZFEV1GbMGoTfjD_TlDUV_pfIIfXU2eJvNsYIVFvVRa7OQxAhzGJPle69aDCxH7jYlu-LbbfSLM-9ZVDiOkmo3zSdgiWYegoSqKJqtGAGoyldsJYC79Fc9up1aNsvk3uJ3NZaE6Xg"#GROUP_ID = 237363984#TIMEZONE = pytz.timezone("Asia/Novosibirsk")##logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')### ========== MULTILINGUAL RESPONSES ==========#RESPONSES = {#    'en': {#        'ask_name': "Hey there! 👋 I'm your personal assistant. What's your name?",#        'got_name': "Nice to meet you, {name}! 👋 I'm here to help with your schedule, tasks, and tracking your progress!",#        'schedule_today': "📅 **Today's Schedule, {name}:**\n\n{classes}\n💡 After each class, click '✅ Mark attended' to track your attendance!",#        'schedule_tomorrow': "📅 **Tomorrow's Schedule, {name}:**\n\n{classes}",#        'no_classes': "🎉 You have no classes today, {name}! Free day!",#        'no_classes_tomorrow': "🎉 No classes tomorrow, {name}! Enjoy your day off!",#        'next_class': "⏰ {name}, your next class is **{subject}** at {time}. That's in about {minutes} minutes!",#        'no_next_class': "🎉 You're all done with classes for today, {name}! Time to relax!",#        'tasks_header': "📋 **Your Tasks, {name}:**\n\n{tasks}\n💡 Say 'Done [task]' when you complete something!\n📊 Check 'Statistics' to see your progress!",#        'no_tasks': "✅ Great job, {name}! You have no pending tasks. All caught up! 🎉",#        'task_added': "✅ Got it, {name}! I've added '{task}' to your list. I'll remind you {days} day(s) before.",#        'task_completed': "🎉 Awesome work, {name}! I've marked '{task}' as complete!\n\n📊 Check 'Statistics' to see your updated progress!",#        'import_success': "🎉 Success! I've imported {count} classes into your schedule, {name}!\n\n✅ I'll remind you before each class.\n📅 Ask 'What's today?' to see your schedule!\n📊 Check 'Statistics' to track your progress!",#        'import_fail': "❌ Couldn't import from that link, {name}. Make sure it's a valid ICS file.",#        'import_instructions': "📥 **How to Import Your Schedule, {name}:**\n\n1️⃣ Send me an ICS link (like from your university portal)\n2️⃣ Use command: /ics [your-link]\n3️⃣ Attach an .ics file\n\nI'll automatically add all your classes and remind you before each one! ⏰",#        'attendance_prompt': "📚 Which class did you attend, {name}?\n\n{classes}\n\nReply with the number or name of the class.",#        'no_classes_attendance': "You have no classes today, {name}! 📭",#        'attendance_marked': "✅ Great! I've marked '{class_name}' as attended, {name}! Keep up the good attendance! 📚",#        'attendance_error': "❌ Couldn't find a class named '{class_name}', {name}. Please try again with the exact name.",#        'help_text': """🤖 **What I Can Do For You, {name}:**##📅 **SCHEDULE**#• "What's today?" - Today's classes#• "What's tomorrow?" - Tomorrow's classes#• "What's next?" - Next class#• Send ICS link - Import your timetable##✅ **ATTENDANCE**#• "Mark attended" - Track classes you attended##📝 **TASKS**#• "My tasks" - See all tasks#• /task "Task" 2025-12-20 23:59 7 [priority]#• "Done [task]" - Mark complete##📊 **STATISTICS**#• "Statistics" - Complete progress report##📥 **IMPORT SCHEDULE**#• Just send me an ICS link#• Use /ics [your-link]##⏰ **REMINDERS**#• Automatic 60-90 min before class##🎯 **PRO TIP:** Track your attendance and tasks to see your productivity score!##What would you like help with? 😊""",#        'stats_header': "📊 **YOUR STUDY STATISTICS, {name}!** 📊",#        'task_mastery': "📝 **TASK MASTERY**\n• ✅ Completed Tasks: {completed}\n• ⏳ Pending Tasks: {pending}\n• 🔴 High Priority Done: {high}\n• 🎯 Productivity Score: {score}%\n   [{bar}]",#        'attendance_section': "📚 **CLASS ATTENDANCE**\n• 📖 Total Classes: {total}\n• ✅ Attended: {attended}\n• ❌ Missed: {missed}\n• 📈 Attendance Rate: {rate}%\n   [{bar}]",#        'study_section': "⏱️ **STUDY TIME**\n• 📅 Today: {today} minutes\n• 📆 This Week: {week} minutes\n• 🏆 Total: {total_study} minutes\n• 💪 Avg Daily: {avg} min/day",#        'motivation': "💡 **MOTIVATION**\n{message}",#        'attendance_tip': "📌 *Track your attendance by clicking '✅ Mark attended' after each class!*",#        'thanks': "You're welcome, {name}! 😊 Anything else I can help with? Check 'Statistics' to see your progress!",#        'time': "🕐 It's {time}, {name}. What's on your schedule?",#        'joke': "😂 Here's a joke for you, {name}: {joke}",#        'greeting': "Hey {name}! 👋 Good to see you! Check 'Statistics' to see your progress! 🎉",#        'unknown': "That's interesting, {name}! How can I help you with that? Try 'Statistics' to see your progress!",#        'reminder': "⏰ **Reminder, {name}!**\n\n📚 {subject}\n🕐 {time}\n\nIn {minutes} minutes! Get ready! 📖\n\n✅ Don't forget to mark attendance after class!",#        'wrong_format': "Format: /task 'Task name' 2025-12-20 23:59 7 [priority]",#        'task_format': "Format: /task 'Task name' YYYY-MM-DD HH:MM days [priority]",#        'no_task_found': "Hmm, I couldn't find a task named '{task}', {name}. Can you check the name?",#        'file_import_success': "🎉 Success! I've imported {count} classes from your file, {name}!",#        'file_import_fail': "❌ Couldn't import from that file, {name}. Make sure it's a valid ICS file."#    },#    'ru': {#        'ask_name': "Привет! 👋 Я твой персональный помощник. Как тебя зовут?",#        'got_name': "Приятно познакомиться, {name}! 👋 Я здесь, чтобы помочь с расписанием, задачами и отслеживанием прогресса!",#        'schedule_today': "📅 **Расписание на сегодня, {name}:**\n\n{classes}\n💡 После каждой пары нажми '✅ Отметить пару', чтобы отслеживать посещаемость!",#        'schedule_tomorrow': "📅 **Расписание на завтра, {name}:**\n\n{classes}",#        'no_classes': "🎉 У тебя сегодня нет пар, {name}! Свободный день!",#        'no_classes_tomorrow': "🎉 Завтра нет пар, {name}! Отдыхай!",#        'next_class': "⏰ {name}, следующая пара: **{subject}** в {time}. Через {minutes} минут!",#        'no_next_class': "🎉 На сегодня пар больше нет, {name}! Время отдыхать!",#        'tasks_header': "📋 **Твои задачи, {name}:**\n\n{tasks}\n💡 Скажи 'Готово [задача]' когда сделаешь!\n📊 Проверь 'Статистику' чтобы увидеть прогресс!",#        'no_tasks': "✅ Отлично, {name}! Нет активных задач. Ты всё успел! 🎉",#        'task_added': "✅ Понял, {name}! Добавил '{task}' в список. Напомню за {days} дн.",#        'task_completed': "🎉 Молодец, {name}! Отметил '{task}' как выполненное!\n\n📊 Проверь 'Статистику' чтобы увидеть прогресс!",#        'import_success': "🎉 Отлично! Я импортировал {count} пар(ы) в расписание, {name}!\n\n✅ Я буду напоминать перед каждой парой.\n📅 Спроси 'Что сегодня?' чтобы увидеть расписание!\n📊 Проверь 'Статистику' чтобы отслеживать прогресс!",#        'import_fail': "❌ Не удалось импортировать по этой ссылке, {name}. Убедись, что это правильный ICS файл.",#        'import_instructions': "📥 **Как импортировать расписание, {name}:**\n\n1️⃣ Отправь мне ICS ссылку (как из университетского портала)\n2️⃣ Используй команду: /ics [ссылка]\n3️⃣ Прикрепи .ics файл\n\nЯ автоматически добавлю все пары и буду напоминать перед каждой! ⏰",#        'attendance_prompt': "📚 Какую пару ты посетил, {name}?\n\n{classes}\n\nОтветь номером или названием пары.",#        'no_classes_attendance': "У тебя сегодня нет пар, {name}! 📭",#        'attendance_marked': "✅ Отлично! Я отметил '{class_name}' как посещённое, {name}! Так держать! 📚",#        'attendance_error': "❌ Не могу найти пару '{class_name}', {name}. Попробуй ещё раз с точным названием.",#        'help_text': """🤖 **Что я умею, {name}:**##📅 **РАСПИСАНИЕ**#• "Что сегодня?" - пары на сегодня#• "Что завтра?" - пары на завтра#• "Что дальше?" - следующую пару#• Отправь ICS ссылку - импорт расписания##✅ **ПОСЕЩАЕМОСТЬ**#• "Отметить пару" - отметить посещённые пары##📝 **ЗАДАЧИ**#• "Мои задачи" - список дел#• /task "Задача" 2025-12-20 23:59 7 [приоритет]#• "Готово [задача]" - отметить выполненное##📊 **СТАТИСТИКА**#• "Статистика" - полный отчёт о прогрессе##📥 **ИМПОРТ РАСПИСАНИЯ**#• Просто отправь ICS ссылку#• Используй /ics [ссылка]##⏰ **НАПОМИНАНИЯ**#• Автоматически за 60-90 минут до пары##🎯 **СОВЕТ:** Отмечай посещаемость и задачи, чтобы видеть свой прогресс!##Чем могу помочь? 😊""",#        'stats_header': "📊 **ТВОЯ СТАТИСТИКА УЧЁБЫ, {name}!** 📊",#        'task_mastery': "📝 **ВЫПОЛНЕНИЕ ЗАДАЧ**\n• ✅ Выполнено задач: {completed}\n• ⏳ Ожидает: {pending}\n• 🔴 Высокий приоритет: {high}\n• 🎯 Продуктивность: {score}%\n   [{bar}]",#        'attendance_section': "📚 **ПОСЕЩАЕМОСТЬ**\n• 📖 Всего пар: {total}\n• ✅ Посещено: {attended}\n• ❌ Пропущено: {missed}\n• 📈 Посещаемость: {rate}%\n   [{bar}]",#        'study_section': "⏱️ **ВРЕМЯ УЧЁБЫ**\n• 📅 Сегодня: {today} минут\n• 📆 На этой неделе: {week} минут\n• 🏆 Всего: {total_study} минут\n• 💪 В среднем: {avg} мин/день",#        'motivation': "💡 **МОТИВАЦИЯ**\n{message}",#        'attendance_tip': "📌 *Отмечай посещаемость, нажимая '✅ Отметить пару' после каждой пары!*",#        'thanks': "Пожалуйста, {name}! 😊 Ещё что-то нужно? Проверь 'Статистику' чтобы увидеть прогресс!",#        'time': "🕐 Сейчас {time}, {name}. Что в планах?",#        'joke': "😂 Шутка для тебя, {name}: {joke}",#        'greeting': "Привет {name}! 👋 Рад тебя видеть! Проверь 'Статистику' чтобы увидеть прогресс! 🎉",#        'unknown': "Интересно, {name}! Чем я могу помочь? Попробуй 'Статистику' чтобы увидеть прогресс!",#        'reminder': "⏰ **Напоминание, {name}!**\n\n📚 {subject}\n🕐 {time}\n\nЧерез {minutes} минут! Готовься! 📖\n\n✅ Не забудь отметить посещаемость после пары!",#        'wrong_format': "Формат: /task 'Название задачи' 2025-12-20 23:59 7 [приоритет]",#        'task_format': "Формат: /task 'Название' ГГГГ-ММ-ДД ЧЧ:ММ дни [приоритет]",#        'no_task_found': "Хм, я не могу найти задачу '{task}', {name}. Проверь название.",#        'file_import_success': "🎉 Отлично! Я импортировал {count} пар(ы) из твоего файла, {name}!",#        'file_import_fail': "❌ Не удалось импортировать из файла, {name}. Убедись, что это правильный ICS файл."#    }#}### ========== DATABASE SETUP ==========#def init_db():#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    #    # Users table#    c.execute("""CREATE TABLE IF NOT EXISTS users (#        vk_id INTEGER PRIMARY KEY,#        name TEXT DEFAULT '',#        language TEXT DEFAULT 'en',#        reminder_offset INTEGER DEFAULT 75,#        join_date DATETIME DEFAULT CURRENT_TIMESTAMP#    )""")#    #    # Schedule table#    c.execute("""CREATE TABLE IF NOT EXISTS schedule (#        id INTEGER PRIMARY KEY AUTOINCREMENT,#        user_id INTEGER,#        subject TEXT,#        day INTEGER,#        start_time TEXT,#        end_time TEXT,#        location TEXT,#        teacher TEXT#    )""")#    #    # Class attendance tracking#    c.execute("""CREATE TABLE IF NOT EXISTS class_attendance (#        id INTEGER PRIMARY KEY AUTOINCREMENT,#        user_id INTEGER,#        class_name TEXT,#        date DATE,#        attended INTEGER DEFAULT 0,#        missed INTEGER DEFAULT 0#    )""")#    #    # Tasks table#    c.execute("""CREATE TABLE IF NOT EXISTS tasks (#        id INTEGER PRIMARY KEY AUTOINCREMENT,#        user_id INTEGER,#        task TEXT,#        due_date TEXT,#        remind_days INTEGER,#        priority TEXT DEFAULT 'normal',#        category TEXT DEFAULT 'general',#        done INTEGER DEFAULT 0,#        completed_date DATETIME#    )""")#    #    # Study sessions#    c.execute("""CREATE TABLE IF NOT EXISTS study_sessions (#        id INTEGER PRIMARY KEY AUTOINCREMENT,#        user_id INTEGER,#        subject TEXT,#        duration INTEGER,#        date TEXT#    )""")#    #    # Daily statistics#    c.execute("""CREATE TABLE IF NOT EXISTS daily_stats (#        id INTEGER PRIMARY KEY AUTOINCREMENT,#        user_id INTEGER,#        date DATE,#        tasks_completed INTEGER DEFAULT 0,#        classes_attended INTEGER DEFAULT 0,#        study_minutes INTEGER DEFAULT 0#    )""")#    #    # Reminders#    c.execute("""CREATE TABLE IF NOT EXISTS reminders (#        key TEXT PRIMARY KEY,#        sent INTEGER DEFAULT 1,#        reminder_time DATETIME DEFAULT CURRENT_TIMESTAMP#    )""")#    #    # Conversations#    c.execute("""CREATE TABLE IF NOT EXISTS conversations (#        id INTEGER PRIMARY KEY AUTOINCREMENT,#        user_id INTEGER,#        message TEXT,#        response TEXT,#        created_at DATETIME DEFAULT CURRENT_TIMESTAMP#    )""")#    #    conn.commit()#    #    # Fix existing tables - add missing columns#    try:#        c.execute("PRAGMA table_info(tasks)")#        columns = [col[1] for col in c.fetchall()]#        if 'priority' not in columns:#            c.execute("ALTER TABLE tasks ADD COLUMN priority TEXT DEFAULT 'normal'")#        if 'category' not in columns:#            c.execute("ALTER TABLE tasks ADD COLUMN category TEXT DEFAULT 'general'")#        if 'completed_date' not in columns:#            c.execute("ALTER TABLE tasks ADD COLUMN completed_date DATETIME")#        #        c.execute("PRAGMA table_info(schedule)")#        schedule_cols = [col[1] for col in c.fetchall()]#        if 'location' not in schedule_cols:#            c.execute("ALTER TABLE schedule ADD COLUMN location TEXT DEFAULT ''")#        if 'teacher' not in schedule_cols:#            c.execute("ALTER TABLE schedule ADD COLUMN teacher TEXT DEFAULT ''")#            #        c.execute("PRAGMA table_info(reminders)")#        rem_cols = [col[1] for col in c.fetchall()]#        if 'reminder_time' not in rem_cols and 'timestamp' in rem_cols:#            c.execute("ALTER TABLE reminders RENAME COLUMN timestamp TO reminder_time")#    except Exception as e:#        logging.warning(f"Schema update warning: {e}")#    #    conn.commit()#    conn.close()#    logging.info("Database initialized")##init_db()### ========== HELPER FUNCTIONS ==========#def detect_language(text):#    if not text:#        return 'en'#    cyrillic = sum(1 for c in text if '\u0400' <= c <= '\u04FF')#    if cyrillic > len(text) * 0.1:#        return 'ru'#    return 'en'##def get_user_name(user_id):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("SELECT name FROM users WHERE vk_id = ?", (user_id,))#    row = c.fetchone()#    conn.close()#    return row[0] if row and row[0] else None##def set_user_name(user_id, name):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("INSERT OR REPLACE INTO users (vk_id, name) VALUES (?, ?)", (user_id, name))#    conn.commit()#    conn.close()##def get_user_language(user_id):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("SELECT language FROM users WHERE vk_id = ?", (user_id,))#    row = c.fetchone()#    conn.close()#    return row[0] if row else 'en'##def set_user_language(user_id, lang):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("UPDATE users SET language = ? WHERE vk_id = ?", (lang, user_id))#    conn.commit()#    conn.close()##def get_response(user_id, key, **kwargs):#    lang = get_user_language(user_id) or 'en'#    responses = RESPONSES.get(lang, RESPONSES['en'])#    template = responses.get(key, key)#    try:#        return template.format(**kwargs)#    except:#        return template### ========== SCHEDULE FUNCTIONS ==========#def add_class(user_id, subject, day, start, end, location='', teacher=''):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("INSERT INTO schedule (user_id, subject, day, start_time, end_time, location, teacher) VALUES (?,?,?,?,?,?,?)",#              (user_id, subject, day, start, end, location, teacher))#    conn.commit()#    conn.close()##def get_today_classes(user_id):#    today = datetime.now(TIMEZONE).weekday()#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("SELECT subject, start_time, end_time, location, teacher FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time", #              (user_id, today))#    rows = c.fetchall()#    conn.close()#    return rows##def get_tomorrow_classes(user_id):#    tomorrow = (datetime.now(TIMEZONE).weekday() + 1) % 7#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("SELECT subject, start_time, end_time FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time", #              (user_id, tomorrow))#    rows = c.fetchall()#    conn.close()#    return rows##def get_next_class(user_id):#    now = datetime.now(TIMEZONE)#    current_day = now.weekday()#    current_time = now.strftime("%H:%M")#    #    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("SELECT subject, day, start_time FROM schedule WHERE user_id = ? ORDER BY day, start_time", (user_id,))#    classes = c.fetchall()#    conn.close()#    #    for subject, day, start in classes:#        if day > current_day or (day == current_day and start > current_time):#            return subject, start#    if classes:#        return classes[0][0], classes[0][2]#    return None, None##def get_class_count(user_id):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("SELECT COUNT(*) FROM schedule WHERE user_id = ?", (user_id,))#    count = c.fetchone()[0]#    conn.close()#    return count### ========== ATTENDANCE FUNCTIONS ==========#def mark_attended(user_id, class_name):#    date = datetime.now(TIMEZONE).strftime("%Y-%m-%d")#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    #    c.execute("SELECT id FROM class_attendance WHERE user_id = ? AND class_name = ? AND date = ?", #              (user_id, class_name, date))#    existing = c.fetchone()#    #    if existing:#        c.execute("UPDATE class_attendance SET attended = 1, missed = 0 WHERE id = ?", (existing[0],))#    else:#        c.execute("INSERT INTO class_attendance (user_id, class_name, date, attended, missed) VALUES (?,?,?,1,0)",#                  (user_id, class_name, date))#    #    c.execute("SELECT id FROM daily_stats WHERE user_id = ? AND date = ?", (user_id, date))#    daily = c.fetchone()#    if daily:#        c.execute("UPDATE daily_stats SET classes_attended = classes_attended + 1 WHERE id = ?", (daily[0],))#    else:#        c.execute("INSERT INTO daily_stats (user_id, date, classes_attended) VALUES (?,?,1)", (user_id, date))#    #    conn.commit()#    conn.close()### ========== TASK FUNCTIONS ==========#def add_task(user_id, task, due_date, remind_days, priority='normal'):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("INSERT INTO tasks (user_id, task, due_date, remind_days, priority, done) VALUES (?,?,?,?,?,0)",#              (user_id, task, due_date, remind_days, priority))#    conn.commit()#    conn.close()##def get_tasks(user_id):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("SELECT id, task, due_date, remind_days, priority FROM tasks WHERE user_id = ? AND done = 0 ORDER BY due_date", (user_id,))#    rows = c.fetchall()#    conn.close()#    return rows##def complete_task(task_id, user_id):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    completed_date = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")#    c.execute("UPDATE tasks SET done = 1, completed_date = ? WHERE id = ? AND user_id = ?", #              (completed_date, task_id, user_id))#    #    today = datetime.now(TIMEZONE).strftime("%Y-%m-%d")#    c.execute("SELECT id FROM daily_stats WHERE user_id = ? AND date = ?", (user_id, today))#    daily = c.fetchone()#    if daily:#        c.execute("UPDATE daily_stats SET tasks_completed = tasks_completed + 1 WHERE id = ?", (daily[0],))#    else:#        c.execute("INSERT INTO daily_stats (user_id, date, tasks_completed) VALUES (?,?,1)", (user_id, today))#    #    conn.commit()#    conn.close()##def get_task_stats(user_id):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND done = 0", (user_id,))#    pending = c.fetchone()[0]#    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND done = 1", (user_id,))#    completed = c.fetchone()[0]#    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND done = 1 AND priority = 'high'", (user_id,))#    high = c.fetchone()[0]#    conn.close()#    return pending, completed, high### ========== STUDY FUNCTIONS ==========#def add_study_session(user_id, subject, duration):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    today = datetime.now(TIMEZONE).strftime("%Y-%m-%d")#    c.execute("INSERT INTO study_sessions (user_id, subject, duration, date) VALUES (?,?,?,?)",#              (user_id, subject, duration, today))#    #    c.execute("SELECT id FROM daily_stats WHERE user_id = ? AND date = ?", (user_id, today))#    daily = c.fetchone()#    if daily:#        c.execute("UPDATE daily_stats SET study_minutes = study_minutes + ? WHERE id = ?", (duration, daily[0]))#    else:#        c.execute("INSERT INTO daily_stats (user_id, date, study_minutes) VALUES (?,?,?)", (user_id, today, duration))#    #    conn.commit()#    conn.close()##def get_study_stats(user_id):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    #    c.execute("SELECT SUM(duration) FROM study_sessions WHERE user_id = ?", (user_id,))#    total = c.fetchone()[0] or 0#    #    c.execute("SELECT SUM(duration) FROM study_sessions WHERE user_id = ? AND date >= date('now', '-7 days')", (user_id,))#    weekly = c.fetchone()[0] or 0#    #    c.execute("SELECT SUM(duration) FROM study_sessions WHERE user_id = ? AND date = date('now')", (user_id,))#    today = c.fetchone()[0] or 0#    #    conn.close()#    return total, weekly, today### ========== STATISTICS FUNCTIONS ==========#def get_attendance_stats(user_id):#    conn = sqlite3.connect("assistant.db")#    c = conn.cursor()#    c.execute("SELECT COUNT(*) FROM class_attendance WHERE user_id = ? AND attended = 1", (user_id,))#    attended = c.fetchone()[0]#    c.execute("SELECT COUNT(*) FROM class_attendance WHERE user_id = ? AND missed = 1", (user_id,))#    missed = c.fetchone()[0]#    conn.close()#    return attended, missed### ========== ICS IMPORT ==========#def import_ics_from_link(user_id, url):#    try:#        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}#        response = requests.get(url, timeout=30, headers=headers)#        response.raise_for_status()#        #        cal = Calendar.from_ical(response.text)#        count = 0#        #        for component in cal.walk():#            if component.name == "VEVENT":#                subject = str(component.get('SUMMARY', 'Class'))#                dtstart = component.get('DTSTART')#                dtend = component.get('DTEND')#                #                if dtstart and dtend:#                    start = dtstart.dt#                    end = dtend.dt#                    if not isinstance(start, datetime):#                        start = datetime.combine(start, datetime.min.time())#                    #                    location = str(component.get('LOCATION', ''))#                    add_class(user_id, subject, start.weekday(), start.strftime("%H:%M"), end.strftime("%H:%M"), location, '')#                    count += 1#        return count#    except Exception as e:#        logging.error(f"ICS import error: {e}")#        return -1### ========== BOT FUNCTIONS ==========#def send_message(vk, user_id, text, keyboard=None):#    try:#        if not keyboard:#            keyboard = VkKeyboard().get_empty_keyboard()#        vk.messages.send(user_id=user_id, message=text, random_id=get_random_id(), keyboard=keyboard)#    except Exception as e:#        logging.error(f"Send error: {e}")##def get_keyboard(lang='en'):#    keyboard = VkKeyboard(one_time=False)#    if lang == 'ru':#        keyboard.add_button("📅 Что сегодня?", color=VkKeyboardColor.PRIMARY)#        keyboard.add_button("📅 Что завтра?", color=VkKeyboardColor.PRIMARY)#        keyboard.add_line()#        keyboard.add_button("⏰ Что дальше?", color=VkKeyboardColor.SECONDARY)#        keyboard.add_button("📝 Мои задачи", color=VkKeyboardColor.SECONDARY)#        keyboard.add_line()#        keyboard.add_button("📊 Статистика", color=VkKeyboardColor.POSITIVE)#        keyboard.add_button("📥 Импорт", color=VkKeyboardColor.POSITIVE)#        keyboard.add_line()#        keyboard.add_button("✅ Отметить", color=VkKeyboardColor.PRIMARY)#        keyboard.add_button("❓ Помощь", color=VkKeyboardColor.PRIMARY)#    else:#        keyboard.add_button("📅 What's today?", color=VkKeyboardColor.PRIMARY)#        keyboard.add_button("📅 What's tomorrow?", color=VkKeyboardColor.PRIMARY)#        keyboard.add_line()#        keyboard.add_button("⏰ What's next?", color=VkKeyboardColor.SECONDARY)#        keyboard.add_button("📝 My tasks", color=VkKeyboardColor.SECONDARY)#        keyboard.add_line()#        keyboard.add_button("📊 Statistics", color=VkKeyboardColor.POSITIVE)#        keyboard.add_button("📥 Import", color=VkKeyboardColor.POSITIVE)#        keyboard.add_line()#        keyboard.add_button("✅ Mark", color=VkKeyboardColor.PRIMARY)#        keyboard.add_button("❓ Help", color=VkKeyboardColor.PRIMARY)#    return keyboard.get_keyboard()### ========== MAIN MESSAGE HANDLER ==========#def handle_message(vk, user_id, text, attachments):#    # Detect and set language#    lang = detect_language(text)#    set_user_language(user_id, lang)#    #    name = get_user_name(user_id)#    #    # First time user - ask for name#    if not name and not any(word in text.lower() for word in ['my name is', 'call me', 'меня зовут', 'зовут']):#        send_message(vk, user_id, get_response(user_id, 'ask_name'), get_keyboard(lang))#        return#    #    # Extract name from introduction#    name_match = re.search(r'(?:my name is|call me|меня зовут|зовут)\s+([A-Za-zА-Яа-я]+)', text, re.IGNORECASE)#    if name_match and not name:#        name = name_match.group(1).capitalize()#        set_user_name(user_id, name)#        send_message(vk, user_id, get_response(user_id, 'got_name', name=name), get_keyboard(lang))#        return#    #    # Mark attendance button#    if text in ["✅ Mark", "✅ Отметить"] or text in ["✅ Mark attended", "✅ Отметить пару"]:#        classes = get_today_classes(user_id)#        if classes:#            class_list = "\n".join([f"{i+1}. {subj}" for i, (subj, _, _, _, _) in enumerate(classes)])#            send_message(vk, user_id, get_response(user_id, 'attendance_prompt', name=name, classes=class_list), get_keyboard(lang))#        else:#            send_message(vk, user_id, get_response(user_id, 'no_classes_attendance', name=name), get_keyboard(lang))#        return#    #    # Handle attendance reply (number or name)#    if text.isdigit() and len(text) <= 2:#        classes = get_today_classes(user_id)#        idx = int(text) - 1#        if 0 <= idx < len(classes):#            class_name = classes[idx][0]#            mark_attended(user_id, class_name)#            send_message(vk, user_id, get_response(user_id, 'attendance_marked', name=name, class_name=class_name), get_keyboard(lang))#            return#    #    # Check if text matches a class name for attendance#    classes = get_today_classes(user_id)#    for subj, _, _, _, _ in classes:#        if subj.lower() in text.lower() or text.lower() in subj.lower():#            mark_attended(user_id, subj)#            send_message(vk, user_id, get_response(user_id, 'attendance_marked', name=name, class_name=subj), get_keyboard(lang))#            return#    #    # ICS link detection#    if '.ics' in text and ('http://' in text or 'https://' in text):#        url_match = re.search(r'(https?://[^\s]+\.ics)', text)#        if url_match:#            send_message(vk, user_id, "⏳ " + ("Importing your schedule..." if lang == 'en' else "Импортирую расписание..."), get_keyboard(lang))#            count = import_ics_from_link(user_id, url_match.group(1))#            if count > 0:#                send_message(vk, user_id, get_response(user_id, 'import_success', count=count, name=name), get_keyboard(lang))#            else:#                send_message(vk, user_id, get_response(user_id, 'import_fail', name=name), get_keyboard(lang))#        return#    #    # /ics command#    if text.startswith('/ics'):#        parts = text.split(maxsplit=1)#        if len(parts) == 2:#            ics_url = parts[1].strip()#            if ics_url.startswith(('http://', 'https://')):#                send_message(vk, user_id, "⏳ " + ("Importing..." if lang == 'en' else "Импортирую..."), get_keyboard(lang))#                count = import_ics_from_link(user_id, ics_url)#                if count > 0:#                    send_message(vk, user_id, get_response(user_id, 'import_success', count=count, name=name), get_keyboard(lang))#                else:#                    send_message(vk, user_id, get_response(user_id, 'import_fail', name=name), get_keyboard(lang))#            else:#                send_message(vk, user_id, "❌ " + ("Please provide a valid HTTP or HTTPS link." if lang == 'en' else "Пожалуйста, предоставьте действительную HTTP или HTTPS ссылку."), get_keyboard(lang))#        else:#            send_message(vk, user_id, get_response(user_id, 'import_instructions', name=name), get_keyboard(lang))#        return#    #    # Import button#    if text in ["📥 Import", "📥 Импорт"] or "how to import" in text.lower() or "как импортировать" in text.lower():#        send_message(vk, user_id, get_response(user_id, 'import_instructions', name=name), get_keyboard(lang))#        return#    #    # /task command#    if text.startswith('/task'):#        parts = text.split(maxsplit=3)#        if len(parts) >= 4:#            _, task, due_date, days = parts[0], parts[1], parts[2], parts[3]#            priority = parts[4] if len(parts) > 4 else 'normal'#            if days.isdigit():#                add_task(user_id, task, due_date, int(days), priority)#                send_message(vk, user_id, get_response(user_id, 'task_added', name=name, task=task, days=days), get_keyboard(lang))#            else:#                send_message(vk, user_id, get_response(user_id, 'wrong_format'), get_keyboard(lang))#        else:#            send_message(vk, user_id, get_response(user_id, 'task_format'), get_keyboard(lang))#        return#    #    # Statistics#    if text in ["📊 Statistics", "📊 Статистика"] or "statistics" in text.lower() or "stats" in text.lower() or "статистика" in text.lower():#        # Get all stats#        total_classes = get_class_count(user_id)#        pending, completed, high = get_task_stats(user_id)#        attended, missed = get_attendance_stats(user_id)#        total_study, weekly_study, today_study = get_study_stats(user_id)#        #        # Calculate rates#        attendance_rate = 0#        if attended + missed > 0:#            attendance_rate = round((attended / (attended + missed)) * 100, 1)#        #        productivity_score = 0#        if completed + pending > 0:#            productivity_score = int((completed / (completed + pending)) * 100)#        #        # Create progress bars#        prod_bar = "█" * (productivity_score // 10) + "░" * (10 - (productivity_score // 10))#        attend_bar = "█" * int(attendance_rate / 10) + "░" * (10 - int(attendance_rate / 10))#        #        avg_daily = weekly_study // 7 if weekly_study > 0 else 0#        #        # Build message#        msg = get_response(user_id, 'stats_header', name=name) + "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"#        msg += get_response(user_id, 'task_mastery', completed=completed, pending=pending, high=high, score=productivity_score, bar=prod_bar) + "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"#        msg += get_response(user_id, 'attendance_section', total=total_classes, attended=attended, missed=missed, rate=attendance_rate, bar=attend_bar) + "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"#        msg += get_response(user_id, 'study_section', today=today_study, week=weekly_study, total_study=total_study, avg=avg_daily) + "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"#        #        motivations = [#            "You're doing amazing! Keep pushing forward! 💪",#            "Every step counts! Progress over perfection! 🌟",#            "Your dedication is inspiring! 🎯",#            "Small daily improvements lead to big results! 📈",#            "You've got this! Keep up the great work! 🚀"#        ] if lang == 'en' else [#            "У тебя отлично получается! Продолжай в том же духе! 💪",#            "Каждый шаг имеет значение! Прогресс важнее совершенства! 🌟",#            "Твоя целеустремлённость вдохновляет! 🎯",#            "Маленькие ежедневные улучшения ведут к большим результатам! 📈",#            "У тебя всё получится! Продолжай в том же духе! 🚀"#        ]#        #        msg += get_response(user_id, 'motivation', message=random.choice(motivations)) + "\n\n"#        msg += get_response(user_id, 'attendance_tip')#        #        send_message(vk, user_id, msg, get_keyboard(lang))#        return#    #    text_lower = text.lower()#    #    # Today's schedule#    if any(word in text_lower for word in ['today', 'сегодня', "what's today", 'что сегодня']):#        classes = get_today_classes(user_id)#        if classes:#            days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]#            if lang == 'ru':#                days = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]#            class_list = ""#            for subj, start, end, loc, teacher in classes:#                class_list += f"⏰ {start}-{end} • **{subj}**\n"#                if loc:#                    class_list += f"   📍 {loc}\n"#                class_list += "\n"#            send_message(vk, user_id, get_response(user_id, 'schedule_today', name=name, classes=class_list), get_keyboard(lang))#        else:#            send_message(vk, user_id, get_response(user_id, 'no_classes', name=name), get_keyboard(lang))#        return#    #    # Tomorrow's schedule#    if any(word in text_lower for word in ['tomorrow', 'завтра', "what's tomorrow", 'что завтра']):#        classes = get_tomorrow_classes(user_id)#        if classes:#            class_list = ""#            for subj, start, end, loc, teacher in classes:#                class_list += f"⏰ {start}-{end} • **{subj}**\n"#                if loc:#                    class_list += f"   📍 {loc}\n"#                class_list += "\n"#            send_message(vk, user_id, get_response(user_id, 'schedule_tomorrow', name=name, classes=class_list), get_keyboard(lang))#        else:#            send_message(vk, user_id, get_response(user_id, 'no_classes_tomorrow', name=name), get_keyboard(lang))#        return#    # Next class#    #        subject, time = get_next_class(user_id)#    if any(word in text_lower for word in ['next', "what's next", 'дальше', 'следующая']):#            now = datetime.now(TIMEZONE)#        if subject:#            class_time = now.replace(hour=hour, minute=minute, second=0)#            hour, minute = map(int, time.split(':'))#            if minutes > 0:#            minutes = int((class_time - now).total_seconds() / 60)#            else:#                send_message(vk, user_id, get_response(user_id, 'next_class', name=name, subject=subject, time=time, minutes=minutes), get_keyboard(lang))#        else:#                send_message(vk, user_id, get_response(user_id, 'next_class', name=name, subject=subject, time=time, minutes=0), get_keyboard(lang))#        return#            send_message(vk, user_id, get_response(user_id, 'no_next_class', name=name), get_keyboard(lang))#    # My tasks#    #        tasks = get_tasks(user_id)#    if any(word in text_lower for word in ['tasks', 'task', 'deadlines', 'задачи', 'дела']):#            task_list = ""#        if tasks:#                dt = datetime.strptime(due_date, "%Y-%m-%d %H:%M")#            for tid, task, due_date, days, priority in tasks:#                task_list += f"{priority_icon} **{task}**\n   ⏰ {dt.strftime('%d.%m.%Y %H:%M')}\n\n"#                priority_icon = "🔴" if priority == 'high' else "🟡" if priority == 'medium' else "🟢"#        else:#            send_message(vk, user_id, get_response(user_id, 'tasks_header', name=name, tasks=task_list), get_keyboard(lang))#        return#            send_message(vk, user_id, get_response(user_id, 'no_tasks', name=name), get_keyboard(lang))#    # Complete task#    #    if done_match:#    done_match = re.search(r'(?:done|finished|complete|готово|сделал|выполнил)\s+(.+?)(?:\.|$)', text, re.IGNORECASE)#        tasks = get_tasks(user_id)#        task_name = done_match.group(1).strip()#            if task_name.lower() in task.lower() or task.lower() in task_name.lower():#        for tid, task, due_date, days, priority in tasks:#                send_message(vk, user_id, get_response(user_id, 'task_completed', name=name, task=task), get_keyboard(lang))#                complete_task(tid, user_id)#        send_message(vk, user_id, get_response(user_id, 'no_task_found', name=name, task=task_name), get_keyboard(lang))#                return#    #        return#    study_match = re.search(r'(?:study|studied|учился|занимался)\s+(\d+)\s+(?:minutes?|min|минут?)\s+(?:for\s+)?(.+?)(?:\.|$)', text, re.IGNORECASE)#    # Study logging#        duration = int(study_match.group(1))#    if study_match:#        add_study_session(user_id, subject, duration)#        subject = study_match.group(2).strip()#        return#        send_message(vk, user_id, f"📝 " + ("Great job! I've logged {duration} minutes for {subject}!" if lang == 'en' else f"Отлично! Записал {duration} минут учёбы по {subject}!") + " 📊 Check 'Statistics' to see your progress!", get_keyboard(lang))#    # Help#    #        send_message(vk, user_id, get_response(user_id, 'help_text', name=name), get_keyboard(lang))#    if any(word in text_lower for word in ['help', 'помощь', 'what can you do']):#    #        return#    if any(word in text_lower for word in ['thanks', 'thank you', 'спасибо']):#    # Thanks#        return#        send_message(vk, user_id, get_response(user_id, 'thanks', name=name), get_keyboard(lang))#    # Time#    #        now = datetime.now(TIMEZONE)#    if any(word in text_lower for word in ['time', 'время', 'который час']):#        return#        send_message(vk, user_id, get_response(user_id, 'time', name=name, time=now.strftime('%H:%M')), get_keyboard(lang))#    # Joke#    #        jokes = {#    if any(word in text_lower for word in ['joke', 'шутка']):#            'ru': ["Почему программисты путают Хэллоуин с Рождеством? 31 Oct = 25 Dec!", "Как называется ложная лапша? Паста-фальшивка!", "Что говорит один ноль другому? Без тебя я просто пустое место!"]#            'en': ["Why don't scientists trust atoms? They make up everything!", "What do you call a fake noodle? An impasta!", "Why did the scarecrow win an award? He was outstanding in his field!"],#        send_message(vk, user_id, get_response(user_id, 'joke', name=name, joke=random.choice(jokes[lang])), get_keyboard(lang))#        }#    #        return#    if any(word in text_lower for word in ['hello', 'hi', 'hey', 'привет']):#    # Greeting#        return#        send_message(vk, user_id, get_response(user_id, 'greeting', name=name), get_keyboard(lang))#    # Default response#    ##    send_message(vk, user_id, get_response(user_id, 'unknown', name=name), get_keyboard(lang))#def check_reminders(vk):## ========== REMINDER SYSTEM ==========#        conn = sqlite3.connect("assistant.db")#    try:#        now = datetime.now(TIMEZONE)#        c = conn.cursor()#        #        current_day = now.weekday()#        users = c.fetchall()#        c.execute("SELECT DISTINCT user_id FROM schedule")#        for (user_id,) in users:#        #            name = get_user_name(user_id) or "friend"#            lang = get_user_language(user_id) or 'en'#            c.execute("SELECT subject, start_time FROM schedule WHERE user_id = ? AND day = ?", (user_id, current_day))#            #            #            classes = c.fetchall()#                hour, minute = map(int, start_time.split(':'))#            for subject, start_time in classes:#                minutes_until = (class_time - now).total_seconds() / 60#                class_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)#                if 60 <= minutes_until <= 90:#                #                    c.execute("SELECT sent FROM reminders WHERE key = ?", (key,))#                    key = f"reminder_{user_id}_{current_day}_{start_time}"#                        msg = get_response(user_id, 'reminder', name=name, subject=subject, time=start_time, minutes=int(minutes_until))#                    if not c.fetchone():#                        c.execute("INSERT INTO reminders (key, sent) VALUES (?, ?)", (key, 1))#                        send_message(vk, user_id, msg, get_keyboard(lang))#        #                        conn.commit()#    except Exception as e:#        conn.close()##        logging.error(f"Reminder error: {e}")#scheduler = BackgroundScheduler()## ========== MAIN ==========#def main():##    print("🤖 Personal Assistant Bot - English & Russian Support")#    print("=" * 60)#    print("✅ Features:")#    print("=" * 60)#    print("   • Schedule management")#    print("   • English & Russian languages (auto-detects)")#    print("   • Class attendance tracking")#    print("   • Task tracking with priorities")#    print("   • Complete statistics")#    print("   • Study time logging")#    print("   • ICS calendar import")#    print("   • 60-90 minute reminders")#    #    print("=" * 60)#        vk_session = vk_api.VkApi(token=VK_TOKEN)#    try:#        #        vk = vk_session.get_api()#        scheduler.start()#        scheduler.add_job(lambda: check_reminders(vk), 'interval', minutes=5)#        print("✅ Bot is running!")#        #        print("📥 Send me an ICS link to import your schedule")#        print("💬 I speak English and Russian (auto-detects your language)")#        #        print("=" * 60 + "\n")#        #        longpoll = VkBotLongPoll(vk_session, GROUP_ID)#            if event.type == VkBotEventType.MESSAGE_NEW:#        for event in longpoll.listen():#                    msg = event.object.message#                try:#                    text = msg.get("text", "").strip()#                    user_id = msg["from_id"]#                    #                    attachments = msg.get("attachments", [])#                    ics_files = [att for att in attachments if att["type"] == "doc" and att["doc"]["title"].endswith(".ics")]#                    # Handle file uploads#                        url = ics_files[0]["doc"]["url"]#                    if ics_files:#                        if resp.status_code == 200:#                        resp = requests.get(url)#                            set_user_language(user_id, lang)#                            lang = detect_language(text)#                            count = import_ics_from_link(user_id, url)#                            name = get_user_name(user_id) or "friend"#                                send_message(vk, user_id, get_response(user_id, 'file_import_success', count=count, name=name), get_keyboard(lang))#                            if count > 0:#                                send_message(vk, user_id, get_response(user_id, 'file_import_fail', name=name), get_keyboard(lang))#                            else:#                    #                        continue#                    payload = msg.get("payload")#                    # Handle button payloads#                        try:#                    if payload:#                            if payload.get("cmd") == "complete":#                            payload = json.loads(payload)#                                lang = get_user_language(user_id) or 'en'#                                complete_task(payload["tid"], user_id)#                                send_message(vk, user_id, get_response(user_id, 'task_completed', name=name, task="task"), get_keyboard(lang))#                                name = get_user_name(user_id) or "friend"#                            pass#                        except:#                    #                        continue#                    if text:#                    # Handle messages#                        #                        handle_message(vk, user_id, text, attachments)#                    logging.error(f"Error: {e}")#                except Exception as e:#    except KeyboardInterrupt:#                    #        scheduler.shutdown()#        print("\n🛑 Bot stopped")#        print(f"\n❌ Error: {e}")#    except Exception as e:#if __name__ == "__main__":###    main()
+#        for event in longpoll.listen():#       
+#      
+import logging
+import sqlite3
+import json
+import requests
+from datetime import datetime, timedelta
+import vk_api
+from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
+from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+from vk_api.utils import get_random_id
+from icalendar import Calendar
+from apscheduler.schedulers.background import BackgroundScheduler
+import pytz
+import re
+import random
+import uuid
+
+# ========== CONFIGURATION ==========
+VK_TOKEN = "vk1.a.eZvEbyVQo2aLD4K-r_7DxudJLQ4iNke42CLOnxo-ewzkJhDCjgY-FFImW2JeNulCAByv9bzkSuo_VXZFEV1GbMGoTfjD_TlDUV_pfIIfXU2eJvNsYIVFvVRa7OQxAhzGJPle69aDCxH7jYlu-LbbfSLM-9ZVDiOkmo3zSdgiWYegoSqKJqtGAGoyldsJYC79Fc9up1aNsvk3uJ3NZaE6Xg"
+GROUP_ID = 237363984
+TIMEZONE = pytz.timezone("Asia/Novosibirsk")
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# ========== DATABASE SETUP ==========
+def init_db():
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    
+    c.execute("""CREATE TABLE IF NOT EXISTS users (
+        vk_id INTEGER PRIMARY KEY,
+        name TEXT DEFAULT '',
+        language TEXT DEFAULT 'en',
+        reminder_offset INTEGER DEFAULT 75,
+        join_date DATETIME DEFAULT CURRENT_TIMESTAMP
+    )""")
+    
+    c.execute("""CREATE TABLE IF NOT EXISTS schedule (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        subject TEXT,
+        day INTEGER,
+        start_time TEXT,
+        end_time TEXT,
+        location TEXT,
+        teacher TEXT
+    )""")
+    
+    c.execute("""CREATE TABLE IF NOT EXISTS tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        task TEXT,
+        due_date TEXT,
+        remind_days INTEGER,
+        priority TEXT DEFAULT 'normal',
+        category TEXT DEFAULT 'general',
+        done INTEGER DEFAULT 0,
+        completed_date DATETIME
+    )""")
+    
+    c.execute("""CREATE TABLE IF NOT EXISTS study_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        subject TEXT,
+        duration INTEGER,
+        date TEXT,
+        notes TEXT DEFAULT ''
+    )""")
+    
+    c.execute("""CREATE TABLE IF NOT EXISTS pomodoro_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        subject TEXT,
+        duration INTEGER,
+        completed_cycles INTEGER,
+        date TEXT
+    )""")
+    
+    c.execute("""CREATE TABLE IF NOT EXISTS goals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        goal TEXT,
+        target INTEGER,
+        current INTEGER DEFAULT 0,
+        unit TEXT DEFAULT 'hours',
+        deadline TEXT,
+        created_date TEXT
+    )""")
+    
+    c.execute("""CREATE TABLE IF NOT EXISTS reminders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        key TEXT UNIQUE,
+        sent INTEGER DEFAULT 1,
+        reminder_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )""")
+    
+    c.execute("""CREATE TABLE IF NOT EXISTS time_blocks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        title TEXT,
+        start_time TEXT,
+        end_time TEXT,
+        date TEXT,
+        type TEXT DEFAULT 'study'
+    )""")
+    
+    conn.commit()
+    conn.close()
+    logging.info("Database initialized with all tables")
+
+init_db()
+
+# ========== LANGUAGE SYSTEM (EN, RU, ZH) ==========
+RESPONSES = {
+    'en': {
+        'ask_name': "👋 Hello! I'm your study assistant bot. What's your name?",
+        'got_name': "Nice to meet you, {name}! 🎉\n\nI can help you with:\n📅 Schedule management\n📝 Task tracking\n⏱️ Time management\n📊 Progress statistics\n📥 Calendar import\n\nUse /help to see all commands!",
+        'help': """🤖 *BOT COMMANDS*
+
+📅 *SCHEDULE*
+• "Today" - Today's classes
+• "Tomorrow" - Tomorrow's classes
+• /add [subj] [day] [start] [end] - Add class
+• /ics [url] - Import calendar
+
+📝 *TASKS*
+• "Tasks" - View your tasks
+• /task [name] [date] [priority] - Add task
+• /done [task] - Complete task
+• /deadlines - Upcoming deadlines
+
+⏱️ *TIME MANAGEMENT*
+• /focus [subj] [min] - Start focus timer
+• /pomodoro [subj] - Start Pomodoro
+• /stop - Stop timer
+• /timeblock - Schedule time block
+• /todayplan - Today's plan
+• /weekplan - Weekly plan
+
+📊 *STATS & GOALS*
+• /stats - Your statistics
+• /goal [text] [target] - Set goal
+• /goals - View your goals
+• /progress - Goal progress
+
+⚙️ *OTHER*
+• /language [en/ru/zh] - Change language
+• /time - Current time
+• /joke - Random joke""",
+        'today': "📅 *Today's Schedule*\n\n{classes}",
+        'tomorrow': "📅 *Tomorrow's Schedule*\n\n{classes}",
+        'no_classes': "🎉 No classes today! Time to study or relax!",
+        'tasks_empty': "✅ No pending tasks! Great job!",
+        'tasks_list': "📝 *Your Tasks*\n\n{tasks}",
+        'task_added': "✅ Task added: {task}\n📅 Due: {due}\n⚡ Priority: {priority}",
+        'task_completed': "🎉 Task '{task}' completed! Keep it up!",
+        'focus_start': "⏱️ *Focus Mode ON*\n\n📖 {subject}\n⏰ {duration} min\n\nStay focused! I'll notify you when done.",
+        'focus_done': "🎉 *Focus Complete!*\n\n📖 {subject}\n⏰ {duration} min\n\nGreat work! Take a 5-min break.",
+        'focus_stop': "⏹️ Focus stopped.\nCompleted {elapsed} min.",
+        'pomodoro_start': "🍅 *Pomodoro Started!*\n\n{cycles} cycles (25min work + 5min break)\n\nSubject: {subject}",
+        'pomodoro_break': "☕ Break time! 5 minutes.",
+        'pomodoro_long_break': "☕ Long break! 15 minutes.",
+        'pomodoro_done': "🎉 Pomodoro complete! {cycles} cycles done!",
+        'stats': """📊 *YOUR STATISTICS*
+
+📝 Tasks: {completed}/{total} completed ({rate}%)
+⏱️ Study time: {study_hours}h {study_min}min
+📚 Classes: {class_count}
+🎯 Goals: {goals_completed}/{goals_total} achieved
+
+📈 Productivity Score: {productivity}%""",
+        'goal_set': "🎯 Goal set: {goal}\nTarget: {target} {unit}",
+        'no_goals': "No goals set yet. Use /goal to create one!",
+        'import_success': "✅ Imported {count} classes!",
+        'import_fail': "❌ Import failed: {error}",
+        'time': "🕐 Current time: {time}",
+        'language_changed': "✅ Language changed to {language}",
+        'weekdays': ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+        'error': "❌ Something went wrong. Please try again.",
+        'importing': "⏳ Importing calendar...",
+        'focus_usage': "Usage: /focus [subject] [minutes]\nExample: /focus Math 30\n\nOr use /pomodoro [subject] for Pomodoro technique (4 cycles of 25min)",
+        'delete_usage': "Usage: /delete [class_id]\nFind IDs in schedule",
+        'class_deleted': "✅ Class deleted!",
+        'follow_help': "Try /help for available commands! 🚀"
+    },
+    'ru': {
+        'ask_name': "👋 Привет! Я твой учебный помощник. Как тебя зовут?",
+        'got_name': "Приятно познакомиться, {name}! 🎉\n\nЯ помогу с:\n📅 Расписанием\n📝 Задачами\n⏱️ Управлением временем\n📊 Статистикой\n📥 Импортом календаря\n\nИспользуй /help для команд!",
+        'help': """🤖 *КОМАНДЫ БОТА*
+
+📅 *РАСПИСАНИЕ*
+• "Сегодня" - Пары сегодня
+• "Завтра" - Пары завтра
+• /add [предмет] [день] [начало] [конец]
+• /ics [ссылка] - Импорт календаря
+
+📝 *ЗАДАЧИ*
+• "Задачи" - Список задач
+• /task [имя] [дата] [приоритет]
+• /done [задача] - Выполнить
+• /deadlines - Ближайшие сроки
+
+⏱️ *ТАЙМ-МЕНЕДЖМЕНТ*
+• /focus [предмет] [мин] - Фокус
+• /pomodoro [предмет] - Помодоро
+• /stop - Стоп таймер
+• /timeblock - Блок времени
+• /todayplan - План на сегодня
+• /weekplan - План на неделю
+
+📊 *СТАТИСТИКА*
+• /stats - Статистика
+• /goal [текст] [цель] - Цель
+• /goals - Мои цели
+• /progress - Прогресс целей
+
+⚙️ *ПРОЧЕЕ*
+• /language [en/ru/zh] - Сменить язык
+• /time - Время
+• /joke - Шутка""",
+        'today': "📅 *Расписание на сегодня*\n\n{classes}",
+        'tomorrow': "📅 *Расписание на завтра*\n\n{classes}",
+        'no_classes': "🎉 Сегодня нет пар! Время учиться или отдыхать!",
+        'tasks_empty': "✅ Нет задач! Отличная работа!",
+        'tasks_list': "📝 *Твои задачи*\n\n{tasks}",
+        'task_added': "✅ Задача добавлена: {task}\n📅 Срок: {due}\n⚡ Приоритет: {priority}",
+        'task_completed': "🎉 Задача '{task}' выполнена! Так держать!",
+        'focus_start': "⏱️ *Фокус ВКЛ*\n\n📖 {subject}\n⏰ {duration} мин\n\nСосредоточься! Сообщу когда закончишь.",
+        'focus_done': "🎉 *Фокус завершён!*\n\n📖 {subject}\n⏰ {duration} мин\n\nОтлично! Сделай перерыв 5 мин.",
+        'focus_stop': "⏹️ Фокус остановлен.\nСделано {elapsed} мин.",
+        'pomodoro_start': "🍅 *Помодоро запущен!*\n\n{cycles} циклов (25мин работа + 5мин отдых)\n\nПредмет: {subject}",
+        'pomodoro_break': "☕ Перерыв! 5 минут.",
+        'pomodoro_long_break': "☕ Длинный перерыв! 15 минут.",
+        'pomodoro_done': "🎉 Помодоро завершён! {cycles} циклов сделано!",
+        'stats': """📊 *ТВОЯ СТАТИСТИКА*
+
+📝 Задачи: {completed}/{total} выполнено ({rate}%)
+⏱️ Учёба: {study_hours}ч {study_min}мин
+📚 Пары: {class_count}
+🎯 Цели: {goals_completed}/{goals_total} достигнуто
+
+📈 Продуктивность: {productivity}%""",
+        'goal_set': "🎯 Цель поставлена: {goal}\nЦель: {target} {unit}",
+        'no_goals': "Целей пока нет. Используй /goal чтобы создать!",
+        'import_success': "✅ Импортировано {count} пар!",
+        'import_fail': "❌ Ошибка импорта: {error}",
+        'time': "🕐 Текущее время: {time}",
+        'language_changed': "✅ Язык изменён на {language}",
+        'weekdays': ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"],
+        'error': "❌ Что-то пошло не так. Попробуй снова.",
+        'importing': "⏳ Импортирую календарь...",
+        'focus_usage': "Использование: /focus [предмет] [минуты]\nПример: /focus Математика 30\n\nИли /pomodoro [предмет] для техники Помодоро (4 цикла по 25 мин)",
+        'delete_usage': "Использование: /delete [id_пары]\nНайди ID в расписании",
+        'class_deleted': "✅ Пара удалена!",
+        'follow_help': "Попробуй /help для списка команд! 🚀"
+    },
+    'zh': {
+        'ask_name': "👋 你好！我是你的学习助手机器人。你叫什么名字？",
+        'got_name': "很高兴认识你, {name}! 🎉\n\n我可以帮助你：\n📅 课程表管理\n📝 任务跟踪\n⏱️ 时间管理\n📊 进度统计\n📥 日历导入\n\n使用 /help 查看所有命令！",
+        'help': """🤖 *机器人命令*
+
+📅 *课程表*
+• "今天" - 今日课程
+• "明天" - 明日课程
+• /add [科目] [星期] [开始] [结束] - 添加课程
+• /ics [链接] - 导入日历
+
+📝 *任务*
+• "任务" - 查看任务
+• /task [名称] [日期] [优先级] - 添加任务
+• /done [任务] - 完成任务
+• /deadlines - 即将截止
+
+⏱️ *时间管理*
+• /focus [科目] [分钟] - 开始专注
+• /pomodoro [科目] - 番茄工作法
+• /stop - 停止计时
+• /timeblock - 安排时间块
+• /todayplan - 今日计划
+• /weekplan - 周计划
+
+📊 *统计与目标*
+• /stats - 你的统计
+• /goal [文字] [目标] - 设定目标
+• /goals - 查看目标
+• /progress - 目标进度
+
+⚙️ *其他*
+• /language [en/ru/zh] - 切换语言
+• /time - 当前时间
+• /joke - 随机笑话""",
+        'today': "📅 *今日课程*\n\n{classes}",
+        'tomorrow': "📅 *明日课程*\n\n{classes}",
+        'no_classes': "🎉 今天没课！学习或放松的时间！",
+        'tasks_empty': "✅ 没有待办任务！做得好！",
+        'tasks_list': "📝 *你的任务*\n\n{tasks}",
+        'task_added': "✅ 任务已添加: {task}\n📅 截止: {due}\n⚡ 优先级: {priority}",
+        'task_completed': "🎉 任务 '{task}' 已完成！继续加油！",
+        'focus_start': "⏱️ *专注模式开启*\n\n📖 {subject}\n⏰ {duration} 分钟\n\n保持专注！完成后我会通知你。",
+        'focus_done': "🎉 *专注完成！*\n\n📖 {subject}\n⏰ {duration} 分钟\n\n做得好！休息5分钟。",
+        'focus_stop': "⏹️ 专注已停止。\n完成 {elapsed} 分钟。",
+        'pomodoro_start': "🍅 *番茄工作法开始！*\n\n{cycles} 个周期 (25分钟工作 + 5分钟休息)\n\n科目: {subject}",
+        'pomodoro_break': "☕ 休息时间！5分钟。",
+        'pomodoro_long_break': "☕ 长时间休息！15分钟。",
+        'pomodoro_done': "🎉 番茄工作法完成！{cycles} 个周期完成！",
+        'stats': """📊 *你的统计*
+
+📝 任务: {completed}/{total} 已完成 ({rate}%)
+⏱️ 学习时间: {study_hours}小时 {study_min}分钟
+📚 课程: {class_count}
+🎯 目标: {goals_completed}/{goals_total} 已达成
+
+📈 效率评分: {productivity}%""",
+        'goal_set': "🎯 目标已设定: {goal}\n目标: {target} {unit}",
+        'no_goals': "还没有设定目标。使用 /goal 创建一个！",
+        'import_success': "✅ 已导入 {count} 门课程！",
+        'import_fail': "❌ 导入失败: {error}",
+        'time': "🕐 当前时间: {time}",
+        'language_changed': "✅ 语言已切换到{language}",
+        'weekdays': ["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
+        'error': "❌ 出了点问题。请重试。",
+        'importing': "⏳ 正在导入日历...",
+        'focus_usage': "用法: /focus [科目] [分钟]\n示例: /focus 数学 30\n\n或使用 /pomodoro [科目] 进行番茄工作法 (4个周期，每个25分钟)",
+        'delete_usage': "用法: /delete [课程ID]\n在课程表中查找ID",
+        'class_deleted': "✅ 课程已删除！",
+        'follow_help': "尝试 /help 查看可用命令！🚀"
+    }
+}
+
+def get_response(user_id, key, **kwargs):
+    lang = get_user_language(user_id)
+    responses = RESPONSES.get(lang, RESPONSES['en'])
+    template = responses.get(key, RESPONSES['en'].get(key, key))
+    try:
+        return template.format(**kwargs)
+    except:
+        return template
+
+# ========== HELPER FUNCTIONS ==========
+def detect_language(text):
+    if not text:
+        return 'en'
+    # Check for Cyrillic (Russian)
+    cyrillic = sum(1 for c in text if '\u0400' <= c <= '\u04FF')
+    if cyrillic > len(text) * 0.1:
+        return 'ru'
+    # Check for Chinese characters
+    chinese = sum(1 for c in text if '\u4e00' <= c <= '\u9fff' or '\u3400' <= c <= '\u4dbf')
+    if chinese > len(text) * 0.1:
+        return 'zh'
+    return 'en'
+
+def get_user_name(user_id):
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    c.execute("SELECT name FROM users WHERE vk_id = ?", (user_id,))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row and row[0] else None
+
+def set_user_name(user_id, name):
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO users (vk_id, name) VALUES (?, ?)", (user_id, name))
+    conn.commit()
+    conn.close()
+
+def get_user_language(user_id):
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    c.execute("SELECT language FROM users WHERE vk_id = ?", (user_id,))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else 'en'
+
+def set_user_language(user_id, lang):
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    c.execute("UPDATE users SET language = ? WHERE vk_id = ?", (lang, user_id))
+    conn.commit()
+    conn.close()
+
+# ========== SCHEDULE FUNCTIONS ==========
+def add_class(user_id, subject, day, start, end, location='', teacher=''):
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    c.execute("INSERT INTO schedule (user_id, subject, day, start_time, end_time, location, teacher) VALUES (?,?,?,?,?,?,?)",
+              (user_id, subject, day, start, end, location, teacher))
+    conn.commit()
+    conn.close()
+
+def get_today_classes(user_id):
+    today = datetime.now(TIMEZONE).weekday()
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    c.execute("SELECT id, subject, start_time, end_time, location FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time", (user_id, today))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_tomorrow_classes(user_id):
+    tomorrow = (datetime.now(TIMEZONE).weekday() + 1) % 7
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    c.execute("SELECT id, subject, start_time, end_time, location FROM schedule WHERE user_id = ? AND day = ? ORDER BY start_time", (user_id, tomorrow))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_next_class(user_id):
+    now = datetime.now(TIMEZONE)
+    current_day = now.weekday()
+    current_time = now.strftime("%H:%M")
+    
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    c.execute("SELECT subject, day, start_time, id FROM schedule WHERE user_id = ? ORDER BY day, start_time", (user_id,))
+    classes = c.fetchall()
+    conn.close()
+    
+    for subject, day, start, cid in classes:
+        if day > current_day or (day == current_day and start > current_time):
+            return subject, start, day
+    if classes:
+        return classes[0][0], classes[0][2], classes[0][1]
+    return None, None, None
+
+def get_class_count(user_id):
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM schedule WHERE user_id = ?", (user_id,))
+    count = c.fetchone()[0]
+    conn.close()
+    return count
+
+def delete_class(user_id, class_id):
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    c.execute("DELETE FROM schedule WHERE id = ? AND user_id = ?", (class_id, user_id))
+    conn.commit()
+    conn.close()
+
+def get_all_classes(user_id):
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    c.execute("SELECT id, subject, day, start_time, end_time FROM schedule WHERE user_id = ? ORDER BY day, start_time", (user_id,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+# ========== TASK FUNCTIONS ==========
+def add_task(user_id, task, due_date, remind_days=1, priority='normal'):
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    c.execute("INSERT INTO tasks (user_id, task, due_date, remind_days, priority, done) VALUES (?,?,?,?,?,0)",
+              (user_id, task, due_date, remind_days, priority))
+    conn.commit()
+    conn.close()
+
+def get_tasks(user_id):
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    c.execute("SELECT id, task, due_date, remind_days, priority FROM tasks WHERE user_id = ? AND done = 0 ORDER BY due_date", (user_id,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def complete_task(user_id, task_id):
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    completed_date = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+    c.execute("UPDATE tasks SET done = 1, completed_date = ? WHERE id = ? AND user_id = ?", (completed_date, task_id, user_id))
+    conn.commit()
+    conn.close()
+
+def get_task_stats(user_id):
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND done = 0", (user_id,))
+    pending = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND done = 1", (user_id,))
+    completed = c.fetchone()[0]
+    conn.close()
+    return pending, completed
+
+# ========== STUDY FUNCTIONS ==========
+def add_study_session(user_id, subject, duration, notes=''):
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    today = datetime.now(TIMEZONE).strftime("%Y-%m-%d")
+    c.execute("INSERT INTO study_sessions (user_id, subject, duration, date, notes) VALUES (?,?,?,?,?)",
+              (user_id, subject, duration, today, notes))
+    conn.commit()
+    conn.close()
+
+def get_study_stats(user_id):
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    c.execute("SELECT COALESCE(SUM(duration), 0) FROM study_sessions WHERE user_id = ?", (user_id,))
+    total = c.fetchone()[0]
+    c.execute("SELECT COALESCE(SUM(duration), 0) FROM study_sessions WHERE user_id = ? AND date >= date('now', '-7 days')", (user_id,))
+    weekly = c.fetchone()[0]
+    c.execute("SELECT COALESCE(SUM(duration), 0) FROM study_sessions WHERE user_id = ? AND date = date('now')", (user_id,))
+    today = c.fetchone()[0]
+    conn.close()
+    return total, weekly, today
+
+# ========== GOAL FUNCTIONS ==========
+def add_goal(user_id, goal, target, unit='hours', deadline=None):
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    today = datetime.now(TIMEZONE).strftime("%Y-%m-%d")
+    c.execute("INSERT INTO goals (user_id, goal, target, unit, deadline, created_date) VALUES (?,?,?,?,?,?)",
+              (user_id, goal, target, unit, deadline, today))
+    conn.commit()
+    conn.close()
+
+def get_goals(user_id):
+    conn = sqlite3.connect("assistant.db")
+    c = conn.cursor()
+    c.execute("SELECT id, goal, target, current, unit FROM goals WHERE user_id = ? ORDER BY created_date DESC", (user_id,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+# ========== ICS IMPORT ==========
+def import_ics_from_link(user_id, url):
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, timeout=30, headers=headers)
+        response.raise_for_status()
+        
+        cal = Calendar.from_ical(response.text)
+        count = 0
+        
+        for component in cal.walk():
+            if component.name == "VEVENT":
+                subject = str(component.get('SUMMARY', 'Class'))
+                dtstart = component.get('DTSTART')
+                dtend = component.get('DTEND')
+                
+                if dtstart and dtend:
+                    start = dtstart.dt
+                    end = dtend.dt
+                    
+                    if not isinstance(start, datetime):
+                        start = datetime.combine(start, datetime.min.time())
+                    if not isinstance(end, datetime):
+                        end = datetime.combine(end, datetime.min.time())
+                    
+                    location = str(component.get('LOCATION', ''))
+                    day_of_week = start.weekday()
+                    start_time = start.strftime("%H:%M")
+                    end_time = end.strftime("%H:%M")
+                    
+                    add_class(user_id, subject, day_of_week, start_time, end_time, location)
+                    count += 1
+        
+        return count, None
+    except Exception as e:
+        return -1, str(e)
+
+# ========== BOT FUNCTIONS ==========
+def send_message(vk, user_id, text, keyboard=None):
+    try:
+        if not keyboard:
+            keyboard = VkKeyboard().get_empty_keyboard()
+        vk.messages.send(user_id=user_id, message=text[:4096], random_id=get_random_id(), keyboard=keyboard)
+    except Exception as e:
+        logging.error(f"Send error: {e}")
+
+def get_keyboard(lang='en'):
+    keyboard = VkKeyboard(one_time=False)
+    
+    labels = {
+        'en': {
+            'today': "📅 Today", 'tomorrow': "📅 Tomorrow", 'tasks': "📝 Tasks",
+            'focus': "⏱️ Focus", 'stats': "📊 Stats", 'import': "📥 Import", 'help': "❓ Help"
+        },
+        'ru': {
+            'today': "📅 Сегодня", 'tomorrow': "📅 Завтра", 'tasks': "📝 Задачи",
+            'focus': "⏱️ Фокус", 'stats': "📊 Статистика", 'import': "📥 Импорт", 'help': "❓ Помощь"
+        },
+        'zh': {
+            'today': "📅 今天", 'tomorrow': "📅 明天", 'tasks': "📝 任务",
+            'focus': "⏱️ 专注", 'stats': "📊 统计", 'import': "📥 导入", 'help': "❓ 帮助"
+        }
+    }
+    
+    l = labels.get(lang, labels['en'])
+    
+    keyboard.add_button(l['today'], color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button(l['tomorrow'], color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button(l['tasks'], color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button(l['focus'], color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button(l['stats'], color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button(l['import'], color=VkKeyboardColor.POSITIVE)
+    keyboard.add_line()
+    keyboard.add_button(l['help'], color=VkKeyboardColor.PRIMARY)
+    
+    return keyboard.get_keyboard()
+
+# ========== FOCUS/POMODORO TIMER ==========
+active_timers = {}
+
+def start_focus_timer(vk, user_id, subject, duration):
+    if user_id in active_timers:
+        active_timers[user_id]['cancel'] = True
+    
+    timer_id = str(uuid.uuid4())[:8]
+    active_timers[user_id] = {
+        'id': timer_id,
+        'subject': subject,
+        'duration': duration,
+        'start_time': datetime.now(TIMEZONE),
+        'cancel': False
+    }
+    
+    lang = get_user_language(user_id)
+    
+    scheduler.add_job(
+        complete_focus,
+        'date',
+        run_date=datetime.now(TIMEZONE) + timedelta(minutes=duration),
+        args=[vk, user_id, timer_id, subject, duration],
+        id=timer_id
+    )
+    
+    send_message(vk, user_id, get_response(user_id, 'focus_start', subject=subject, duration=duration), get_keyboard(lang))
+
+def start_pomodoro(vk, user_id, subject, cycles=4):
+    if user_id in active_timers:
+        active_timers[user_id]['cancel'] = True
+    
+    timer_id = str(uuid.uuid4())[:8]
+    active_timers[user_id] = {
+        'id': timer_id,
+        'subject': subject,
+        'cycles': cycles,
+        'current_cycle': 0,
+        'cancel': False,
+        'type': 'pomodoro'
+    }
+    
+    total_duration = cycles * 30
+    lang = get_user_language(user_id)
+    
+    send_message(vk, user_id, get_response(user_id, 'pomodoro_start', subject=subject, cycles=cycles), get_keyboard(lang))
+    
+    for i in range(cycles):
+        break_time = datetime.now(TIMEZONE) + timedelta(minutes=i * 30 + 25)
+        
+        scheduler.add_job(
+            pomodoro_break_reminder,
+            'date',
+            run_date=break_time,
+            args=[vk, user_id, timer_id, i + 1, cycles],
+            id=f"{timer_id}_break_{i}"
+        )
+    
+    scheduler.add_job(
+        complete_pomodoro,
+        'date',
+        run_date=datetime.now(TIMEZONE) + timedelta(minutes=total_duration),
+        args=[vk, user_id, timer_id, subject, cycles],
+        id=f"{timer_id}_complete"
+    )
+
+def pomodoro_break_reminder(vk, user_id, timer_id, cycle, total_cycles):
+    if user_id not in active_timers or active_timers[user_id].get('cancel'):
+        return
+    
+    current = active_timers[user_id]
+    if current['id'] != timer_id:
+        return
+    
+    current['current_cycle'] = cycle
+    lang = get_user_language(user_id)
+    
+    if cycle % 4 == 0:
+        send_message(vk, user_id, get_response(user_id, 'pomodoro_long_break'), get_keyboard(lang))
+    else:
+        send_message(vk, user_id, get_response(user_id, 'pomodoro_break'), get_keyboard(lang))
+
+def complete_focus(vk, user_id, timer_id, subject, duration):
+    if user_id not in active_timers:
+        return
+    
+    current = active_timers[user_id]
+    if current.get('cancel') or current['id'] != timer_id:
+        return
+    
+    add_study_session(user_id, subject, duration)
+    del active_timers[user_id]
+    
+    send_message(vk, user_id, get_response(user_id, 'focus_done', subject=subject, duration=duration))
+
+def complete_pomodoro(vk, user_id, timer_id, subject, cycles):
+    if user_id not in active_timers:
+        return
+    
+    current = active_timers[user_id]
+    if current.get('cancel') or current['id'] != timer_id:
+        return
+    
+    total_duration = cycles * 25
+    add_study_session(user_id, subject, total_duration, f"Pomodoro: {cycles} cycles")
+    del active_timers[user_id]
+    
+    send_message(vk, user_id, get_response(user_id, 'pomodoro_done', cycles=cycles))
+
+def stop_timer(vk, user_id):
+    if user_id not in active_timers:
+        return False
+    
+    current = active_timers[user_id]
+    elapsed = int((datetime.now(TIMEZONE) - current['start_time']).total_seconds() / 60)
+    current['cancel'] = True
+    del active_timers[user_id]
+    
+    if elapsed > 0:
+        add_study_session(user_id, current.get('subject', 'Study'), elapsed, "Stopped early")
+    
+    send_message(vk, user_id, get_response(user_id, 'focus_stop', elapsed=elapsed))
+    return True
+
+# ========== MAIN MESSAGE HANDLER ==========
+def handle_message(vk, user_id, text, attachments=[]):
+    if not text:
+        return
+    
+    text = text.strip()
+    lang = detect_language(text)
+    set_user_language(user_id, lang)
+    name = get_user_name(user_id)
+    text_lower = text.lower()
+    
+    # First time user
+    if not name and not any(word in text_lower for word in ['my name is', 'call me', 'меня зовут', 'зовут', '我叫', '我的名字是']):
+        send_message(vk, user_id, get_response(user_id, 'ask_name'), get_keyboard(lang))
+        return
+    
+    # Extract name (EN, RU, ZH)
+    name_match = re.search(r'(?:my name is|call me|меня зовут|зовут|我叫|我的名字是|我是)\s+([A-Za-zА-Яа-я\u4e00-\u9fff]+)', text, re.IGNORECASE)
+    if name_match and not name:
+        name = name_match.group(1).capitalize()
+        set_user_name(user_id, name)
+        send_message(vk, user_id, get_response(user_id, 'got_name', name=name), get_keyboard(lang))
+        return
+    
+    # ICS link in text
+    if '.ics' in text and ('http://' in text or 'https://' in text):
+        url_match = re.search(r'(https?://[^\s]+\.ics)', text)
+        if url_match:
+            send_message(vk, user_id, get_response(user_id, 'importing'))
+            count, error = import_ics_from_link(user_id, url_match.group(1))
+            if count > 0:
+                send_message(vk, user_id, get_response(user_id, 'import_success', count=count), get_keyboard(lang))
+            else:
+                send_message(vk, user_id, get_response(user_id, 'import_fail', error=error), get_keyboard(lang))
+        return
+    
+    # File attachments
+    ics_files = [att for att in attachments if att.get("type") == "doc" and att["doc"]["title"].endswith(".ics")]
+    if ics_files:
+        url = ics_files[0]["doc"]["url"]
+        send_message(vk, user_id, get_response(user_id, 'importing'))
+        count, error = import_ics_from_link(user_id, url)
+        if count > 0:
+            send_message(vk, user_id, get_response(user_id, 'import_success', count=count), get_keyboard(lang))
+        else:
+            send_message(vk, user_id, get_response(user_id, 'import_fail', error=error), get_keyboard(lang))
+        return
+    
+    # Help
+    help_triggers = {
+        'en': ['help', '❓ help'],
+        'ru': ['помощь', '❓ помощь'],
+        'zh': ['帮助', '❓ 帮助']
+    }
+    
+    if any(text in help_triggers.get(lang, []) or w in text_lower for w in ['help', 'помощь', '帮助']):
+        send_message(vk, user_id, get_response(user_id, 'help'), get_keyboard(lang))
+        return
+    
+    # Today button triggers
+    today_buttons = {'en': '📅 today', 'ru': '📅 сегодня', 'zh': '📅 今天'}
+    tomorrow_buttons = {'en': '📅 tomorrow', 'ru': '📅 завтра', 'zh': '📅 明天'}
+    tasks_buttons = {'en': '📝 tasks', 'ru': '📝 задачи', 'zh': '📝 任务'}
+    focus_buttons = {'en': '⏱️ focus', 'ru': '⏱️ фокус', 'zh': '⏱️ 专注'}
+    stats_buttons = {'en': '📊 stats', 'ru': '📊 статистика', 'zh': '📊 统计'}
+    import_buttons = {'en': '📥 import', 'ru': '📥 импорт', 'zh': '📥 导入'}
+    
+    # Today
+    if text == today_buttons.get(lang, '') or any(w in text_lower for w in ['today', 'сегодня', '今天']):
+        classes = get_today_classes(user_id)
+        if classes:
+            weekdays = RESPONSES[lang]['weekdays']
+            today_name = weekdays[datetime.now(TIMEZONE).weekday()]
+            class_list = "\n".join([f"#{cid} ⏰ {s}-{e} • **{subj}**" + (f" ({loc})" if loc else "") for cid, subj, s, e, loc in classes])
+            send_message(vk, user_id, f"📅 *{today_name}*\n\n{class_list}", get_keyboard(lang))
+        else:
+            send_message(vk, user_id, get_response(user_id, 'no_classes'), get_keyboard(lang))
+        return
+    
+    # Tomorrow
+    if text == tomorrow_buttons.get(lang, '') or any(w in text_lower for w in ['tomorrow', 'завтра', '明天']):
+        classes = get_tomorrow_classes(user_id)
+        if classes:
+            weekdays = RESPONSES[lang]['weekdays']
+            tomorrow_idx = (datetime.now(TIMEZONE).weekday() + 1) % 7
+            tomorrow_name = weekdays[tomorrow_idx]
+            class_list = "\n".join([f"#{cid} ⏰ {s}-{e} • **{subj}**" for cid, subj, s, e, loc in classes])
+            send_message(vk, user_id, f"📅 *{tomorrow_name}*\n\n{class_list}", get_keyboard(lang))
+        else:
+            send_message(vk, user_id, get_response(user_id, 'no_classes'), get_keyboard(lang))
+        return
+    
+    # Tasks
+    if text == tasks_buttons.get(lang, '') or any(w in text_lower for w in ['tasks', 'задачи', '任务']):
+        tasks = get_tasks(user_id)
+        if tasks:
+            priority_icons = {'high': '🔴', 'medium': '🟡', 'low': '🟢', 'normal': '⚪'}
+            task_list = "\n".join([f"{priority_icons.get(p, '⚪')} #{tid} **{task}**\n   📅 {due}" for tid, task, due, r, p in tasks[:10]])
+            send_message(vk, user_id, get_response(user_id, 'tasks_list', tasks=task_list), get_keyboard(lang))
+        else:
+            send_message(vk, user_id, get_response(user_id, 'tasks_empty'), get_keyboard(lang))
+        return
+    
+    # Stats
+    if text == stats_buttons.get(lang, '') or 'stats' in text_lower or 'статистика' in text_lower or '统计' in text_lower:
+        pending, completed = get_task_stats(user_id)
+        total = pending + completed
+        rate = round((completed / total * 100)) if total > 0 else 0
+        total_study, weekly_study, today_study = get_study_stats(user_id)
+        study_hours = total_study // 60
+        study_min = total_study % 60
+        class_count = get_class_count(user_id)
+        goals = get_goals(user_id)
+        goals_total = len(goals)
+        goals_completed = sum(1 for g in goals if g[3] >= g[2])
+        productivity = round((rate * 0.5 + min(total_study / 6000 * 100, 100) * 0.3 + min(class_count / 20 * 100, 100) * 0.2))
+        
+        send_message(vk, user_id, get_response(user_id, 'stats', 
+            completed=completed, total=total, rate=rate,
+            study_hours=study_hours, study_min=study_min,
+            class_count=class_count,
+            goals_completed=goals_completed, goals_total=goals_total,
+            productivity=productivity
+        ), get_keyboard(lang))
+        return
+    
+    # Focus button
+    if text == focus_buttons.get(lang, ''):
+        send_message(vk, user_id, get_response(user_id, 'focus_usage'), get_keyboard(lang))
+        return
+    
+    # Import button
+    if text == import_buttons.get(lang, ''):
+        send_message(vk, user_id, "📥 Send me an .ics file or use /ics [url]", get_keyboard(lang))
+        return
+    
+    # /focus command
+    if text_lower.startswith('/focus'):
+        parts = text.split()
+        if len(parts) >= 3:
+            subject = parts[1]
+            duration = int(parts[2]) if parts[2].isdigit() else 25
+            start_focus_timer(vk, user_id, subject, min(duration, 180))
+        elif len(parts) == 2:
+            start_focus_timer(vk, user_id, parts[1], 25)
+        else:
+            send_message(vk, user_id, get_response(user_id, 'focus_usage'), get_keyboard(lang))
+        return
+    
+    # /pomodoro command
+    if text_lower.startswith('/pomodoro'):
+        parts = text.split()
+        subject = parts[1] if len(parts) > 1 else 'Study'
+        cycles = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 4
+        start_pomodoro(vk, user_id, subject, min(cycles, 8))
+        return
+    
+    # /stop command
+    if text_lower.startswith('/stop'):
+        stop_timer(vk, user_id)
+        return
+    
+    # /task command
+    if text_lower.startswith('/task'):
+        match = re.match(r'/task\s+"([^"]+)"\s+(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?)(?:\s+(high|medium|low))?', text)
+        if match:
+            task_name = match.group(1)
+            due_date = match.group(2)
+            priority = match.group(3) or 'normal'
+            add_task(user_id, task_name, due_date, 1, priority)
+            send_message(vk, user_id, get_response(user_id, 'task_added', task=task_name, due=due_date, priority=priority), get_keyboard(lang))
+        else:
+            send_message(vk, user_id, 'Format: /task "Task name" 2026-12-31 [priority]', get_keyboard(lang))
+        return
+    
+    # /done command
+    if text_lower.startswith('/done'):
+        task_id = int(text.split()[1]) if len(text.split()) > 1 and text.split()[1].isdigit() else None
+        if task_id:
+            complete_task(user_id, task_id)
+            send_message(vk, user_id, get_response(user_id, 'task_completed', task=f"#{task_id}"), get_keyboard(lang))
+        else:
+            send_message(vk, user_id, "Usage: /done [task_id]\nFind IDs in /tasks", get_keyboard(lang))
+        return
+    
+    # /add command
+    if text_lower.startswith('/add'):
+        parts = text.split()
+        if len(parts) >= 5:
+            subject = parts[1]
+            day = int(parts[2]) if parts[2].isdigit() and 0 <= int(parts[2]) <= 6 else None
+            start = parts[3]
+            end = parts[4]
+            location = ' '.join(parts[5:]) if len(parts) > 5 else ''
+            if day is not None:
+                add_class(user_id, subject, day, start, end, location)
+                send_message(vk, user_id, f"✅ Added: {subject} on day {day} at {start}-{end}", get_keyboard(lang))
+            else:
+                send_message(vk, user_id, "Day must be 0-6 (0=Mon)", get_keyboard(lang))
+        else:
+            send_message(vk, user_id, "Format: /add Subject Day StartTime EndTime\nExample: /add Math 0 09:00 10:30", get_keyboard(lang))
+        return
+    
+    # /delete command
+    if text_lower.startswith('/delete'):
+        parts = text.split()
+        if len(parts) > 1 and parts[1].isdigit():
+            delete_class(user_id, int(parts[1]))
+            send_message(vk, user_id, get_response(user_id, 'class_deleted'), get_keyboard(lang))
+        else:
+            send_message(vk, user_id, get_response(user_id, 'delete_usage'), get_keyboard(lang))
+        return
+    
+    # /ics command
+    if text_lower.startswith('/ics'):
+        parts = text.split(maxsplit=1)
+        if len(parts) == 2:
+            send_message(vk, user_id, get_response(user_id, 'importing'))
+            count, error = import_ics_from_link(user_id, parts[1].strip())
+            if count > 0:
+                send_message(vk, user_id, get_response(user_id, 'import_success', count=count), get_keyboard(lang))
+            else:
+                send_message(vk, user_id, get_response(user_id, 'import_fail', error=error), get_keyboard(lang))
+        else:
+            send_message(vk, user_id, "Usage: /ics [url]", get_keyboard(lang))
+        return
+    
+    # /goal command
+    if text_lower.startswith('/goal'):
+        parts = text.split(maxsplit=2)
+        if len(parts) >= 3:
+            goal = parts[1]
+            target = int(parts[2]) if parts[2].isdigit() else 10
+            add_goal(user_id, goal, target)
+            send_message(vk, user_id, get_response(user_id, 'goal_set', goal=goal, target=target, unit='hours'), get_keyboard(lang))
+        else:
+            send_message(vk, user_id, "Usage: /goal [description] [target_hours]", get_keyboard(lang))
+        return
+    
+    # /goals command
+    if text_lower == '/goals':
+        goals = get_goals(user_id)
+        if goals:
+            msg = "🎯 *Goals*\n\n"
+            for gid, goal, target, current, unit in goals:
+                pct = round(current / target * 100) if target > 0 else 0
+                bar = "█" * (pct // 10) + "░" * (10 - pct // 10)
+                msg += f"*{goal}*\n  {current}/{target} {unit} | {pct}%\n  [{bar}]\n\n"
+            send_message(vk, user_id, msg, get_keyboard(lang))
+        else:
+            send_message(vk, user_id, get_response(user_id, 'no_goals'), get_keyboard(lang))
+        return
+    
+    # /language command
+    if text_lower.startswith('/language'):
+        parts = text.split()
+        if len(parts) > 1 and parts[1].lower() in ['en', 'ru', 'zh']:
+            set_user_language(user_id, parts[1].lower())
+            lang_names = {'en': 'English', 'ru': 'Русский', 'zh': '中文'}
+            send_message(vk, user_id, get_response(user_id, 'language_changed', language=lang_names[parts[1].lower()]), get_keyboard(parts[1].lower()))
+        return
+    
+    # /time command
+    if text_lower == '/time':
+        now = datetime.now(TIMEZONE)
+        send_message(vk, user_id, get_response(user_id, 'time', time=now.strftime("%H:%M")), get_keyboard(lang))
+        return
+    
+    # /joke command
+    if text_lower == '/joke':
+        jokes = {
+            'en': ["Why don't scientists trust atoms? They make up everything!", "Parallel lines have so much in common. It's a shame they'll never meet."],
+            'ru': ["Почему программисты путают Хэллоуин с Рождеством? 31 Oct = 25 Dec!", "Колобок повесился."],
+            'zh': ["为什么科学家不相信原子？因为它们构成一切！", "平行线有那么多共同点。可惜它们永远不会相遇。"]
+        }
+        send_message(vk, user_id, f"😂 {random.choice(jokes.get(lang, jokes['en']))}", get_keyboard(lang))
+        return
+    
+    # Greeting
+    greetings = {'en': ['hello', 'hi', 'hey'], 'ru': ['привет', 'здравствуй'], 'zh': ['你好', '嗨', '嘿']}
+    if any(w in text_lower for w in greetings.get(lang, [])):
+        msg = {
+            'en': f"👋 Hey {name}! How can I help you today?" if name else "👋 Hello! What's your name?",
+            'ru': f"👋 Привет {name}! Чем могу помочь?" if name else "👋 Привет! Как тебя зовут?",
+            'zh': f"👋 你好 {name}！今天我能帮你什么？" if name else "👋 你好！你叫什么名字？"
+        }
+        send_message(vk, user_id, msg.get(lang, msg['en']), get_keyboard(lang))
+        return
+    
+    # Default
+    if name:
+        responses_list = {
+            'en': [f"How can I help, {name}?", f"Hey {name}! Check /stats!", f"What would you like to do?"],
+            'ru': [f"Чем помочь, {name}?", f"Привет {name}! Проверь /stats!", f"Что хочешь сделать?"],
+            'zh': [f"需要帮助吗, {name}？", f"嘿 {name}！查看 /stats！", f"你想做什么？"]
+        }
+        send_message(vk, user_id, random.choice(responses_list.get(lang, responses_list['en'])), get_keyboard(lang))
+    else:
+        send_message(vk, user_id, get_response(user_id, 'ask_name'), get_keyboard(lang))
+
+# ========== REMINDER SYSTEM ==========
+def check_reminders(vk):
+    try:
+        conn = sqlite3.connect("assistant.db")
+        c = conn.cursor()
+        now = datetime.now(TIMEZONE)
+        current_day = now.weekday()
+        
+        c.execute("SELECT DISTINCT user_id FROM schedule")
+        users = c.fetchall()
+        
+        for (user_id,) in users:
+            name = get_user_name(user_id) or "student"
+            lang = get_user_language(user_id)
+            
+            c.execute("SELECT subject, start_time FROM schedule WHERE user_id = ? AND day = ?", (user_id, current_day))
+            classes = c.fetchall()
+            
+            for subject, start_time in classes:
+                hour, minute = map(int, start_time.split(':'))
+                class_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                minutes_until = (class_time - now).total_seconds() / 60
+                
+                if 60 <= minutes_until <= 90:
+                    key = f"reminder_{user_id}_{current_day}_{start_time}"
+                    c.execute("SELECT sent FROM reminders WHERE key = ?", (key,))
+                    if not c.fetchone():
+                        msgs = {
+                            'en': f"⏰ {name}, reminder! {subject} in {int(minutes_until)} min at {start_time}!",
+                            'ru': f"⏰ {name}, напоминание! {subject} через {int(minutes_until)} мин в {start_time}!",
+                            'zh': f"⏰ {name}，提醒！{subject} 在 {int(minutes_until)} 分钟后 ({start_time})！"
+                        }
+                        send_message(vk, user_id, msgs.get(lang, msgs['en']))
+                        c.execute("INSERT OR IGNORE INTO reminders (key, sent) VALUES (?, 1)", (key,))
+                        conn.commit()
+        
+        conn.close()
+    except Exception as e:
+        logging.error(f"Reminder error: {e}")
+
+# ========== MAIN ==========
+scheduler = BackgroundScheduler()
+
+def main():
+    print("=" * 60)
+    print("🤖 VITA BOT - Multilingual Study Assistant")
+    print("=" * 60)
+    print("✅ Features:")
+    print("   • Schedule management with reminders")
+    print("   • Task tracking with priorities")
+    print("   • Focus/Pomodoro timers")
+    print("   • Goal setting & tracking")
+    print("   • ICS calendar import")
+    print("   • Languages: English, Русский, 中文")
+    print("=" * 60)
+    
+    try:
+        vk_session = vk_api.VkApi(token=VK_TOKEN)
+        vk = vk_session.get_api()
+        
+        scheduler.add_job(lambda: check_reminders(vk), 'interval', minutes=5)
+        scheduler.start()
+        
+        print("✅ Bot is running!")
+        print("💬 Listening for messages...\n")
+        
+        longpoll = VkBotLongPoll(vk_session, GROUP_ID)
+        
+        for event in longpoll.listen():
+            if event.type == VkBotEventType.MESSAGE_NEW:
+                try:
+                    msg = event.object.message
+                    user_id = msg["from_id"]
+                    text = msg.get("text", "").strip()
+                    attachments = msg.get("attachments", [])
+                    
+                    if text or attachments:
+                        handle_message(vk, user_id, text, attachments)
+                        
+                except Exception as e:
+                    logging.error(f"Error processing message: {e}")
+                    
+    except KeyboardInterrupt:
+        print("\n🛑 Bot stopped")
+        scheduler.shutdown()
+    except Exception as e:
+        print(f"\n❌ Fatal error: {e}")
+        scheduler.shutdown()
+
+if __name__ == "__main__":
+    main()
